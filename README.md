@@ -22,6 +22,10 @@
 - **Chrome MCP 一键安装**：给 Claude Code 装浏览器操作能力，装完做真实握手验证。
 - **可被 Claude 驱动**：本机 MCP 服务把能力暴露成工具，配合 `skills/` 里的技能使用。
 
+> **关于「加好友」和「加群」**：只有 **QQ** 能自动化——搜号码→加好友、搜群号→申请加群。
+> 微信/企业微信的加好友只能扫码、手机号或邀请，没有可自动化的入口；微信群必须靠邀请或二维码。
+> 网页平台没有「好友」概念，等价物是「关注」。**留言**则是七个网页平台都支持。
+
 | 按方向找人 | 无限模式 |
 |---|---|
 | ![discover](data/screenshots/flutter_discover_picked.png) | ![infinite](data/screenshots/flutter_infinite.png) |
