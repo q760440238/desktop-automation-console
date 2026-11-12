@@ -1,0 +1,9 @@
+fastapi>=0.135
+uvicorn>=0.42
+pydantic>=2.12
+playwright>=1.65
+pywinauto>=0.6.9
+uiautomation>=2.0.29
+pywin32>=312
+psutil>=7.2
+pillow>=12.1

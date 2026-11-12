@@ -1,0 +1,35 @@
+# 运行时数据（含账号登录态、聊天截图、数据库，绝不入库）
+data/agent.db
+data/agent.db-wal
+data/agent.db-shm
+data/logs/
+data/browser_profiles/
+data/screenshots/*.png
+!data/screenshots/flutter_main.png
+!data/screenshots/flutter_ten.png
+!data/screenshots/flutter_infinite.png
+!data/screenshots/flutter_discover.png
+!data/screenshots/flutter_discover_picked.png
+!data/screenshots/flutter_ai_models_open.png
+!data/screenshots/flutter_env_installed.png
+
+# 本地配置（含 API Key 与个人路径）
+config/settings.json
+config/ai.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Flutter
+flutter_app/build/
+flutter_app/.dart_tool/
+flutter_app/windows/flutter/ephemeral/
+flutter_app/.flutter-plugins*
+flutter_app/.metadata
+
+# 本机备份 / 临时产物
+backup/
+*.log

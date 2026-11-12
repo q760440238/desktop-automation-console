@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>桌面自动化控制台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%234f8cff'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7">
+        <rect x="3" y="4" width="18" height="13" rx="2.5"/>
+        <path d="M8 21h8M12 17v4"/>
+        <path d="M7.5 9.5l2 2 3-3.5 2 3 2-1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="brand-text">
+      <h1>桌面自动化控制台</h1>
+      <p class="sub">十个渠道 · 本地运行</p>
+    </div>
+  </div>
+
+  <div class="topbar-center">
+    <div class="segmented" id="modeSwitch" role="group" aria-label="运行模式">
+      <button data-mode="dry_run">只出计划</button>
+      <button data-mode="confirm" class="active">确认后执行</button>
+      <button data-mode="auto">自动执行</button>
+    </div>
+    <label class="switch" title="演练模式不会真的操作微信/QQ/浏览器">
+      <input type="checkbox" id="simToggle" checked />
+      <span class="track"><span class="knob"></span></span>
+      <span class="switch-label">演练模式</span>
+    </label>
+  </div>
+
+  <div class="topbar-right">
+    <div class="stat"><b id="runningCount">0</b><span>运行中</span></div>
+    <div class="stat"><b id="pendingCount">0</b><span>待审批</span></div>
+    <button id="panicBtn" class="btn-panic">急停</button>
+  </div>
+</header>
+
+<div id="panicBanner" class="panic-banner hidden">
+  <strong>已急停</strong>：所有任务已中止，新任务无法启动。确认现场安全后点右侧按钮解除。
+  <button id="panicRelease" class="btn-ghost">解除急停</button>
+</div>
+
+<main class="layout">
+
+  <!-- 左栏：平台 -->
+  <section class="col col-platforms">
+    <div class="col-head">
+      <h2>平台</h2>
+      <button id="refreshHealth" class="btn-link" title="重新探测连接状态">刷新</button>
+    </div>
+    <div id="platformList" class="platform-list"></div>
+    <div class="side-note">
+      <p>网页平台第一次使用要先在浏览器里登录一次，登录态保存在本机
+        <code>data/browser_profiles/</code>。</p>
+    </div>
+  </section>
+
+  <!-- 中栏：任务 -->
+  <section class="col col-task">
+    <div class="step">
+      <div class="step-head">
+        <span class="step-no">1</span>
+        <h2>动作</h2>
+        <span id="platformTag" class="tag">未选平台</span>
+      </div>
+      <div id="actionChips" class="chips"></div>
+      <p id="platformHint" class="hint"></p>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <span class="step-no">2</span>
+        <h2>目标</h2>
+        <span id="targetCount" class="badge">0 个</span>
+      </div>
+      <textarea id="targets" rows="5" spellcheck="false"
+        placeholder="每行一个目标，例如：&#10;https://www.douyin.com/user/MS4wLjABAAAA...&#10;https://weibo.com/u/1234567890"></textarea>
+      <div class="row">
+        <span class="hint">自动去重；填写顺序就是执行顺序</span>
+        <button id="clearTargets" class="btn-link">清空</button>
+      </div>
+    </div>
+
+    <div class="step" id="messageStep">
+      <div class="step-head">
+        <span class="step-no">3</span>
+        <h2>文案</h2>
+        <span id="charCount" class="badge">0 字</span>
+      </div>
+      <textarea id="message" rows="4" placeholder="要发送的内容，例如：你好，看到你也在做自动化，方便交流一下吗？&#10;可以用 {nick} 自动带上对方昵称"></textarea>
+      <p class="hint">支持变量 <code>{nick}</code>（对方昵称）、<code>{target}</code>（原始目标）</p>
+    </div>
+
+    <div class="step">
+      <div class="step-head">
+        <span class="step-no">4</span>
+        <h2>安全参数</h2>
+        <span class="hint">来自 config/settings.json</span>
+      </div>
+      <div id="limitsBox" class="limits"></div>
+    </div>
+
+    <div class="actions-row">
+      <button id="planBtn" class="btn-primary btn-lg">生成执行计划</button>
+      <span id="planStatus" class="hint"></span>
+    </div>
+  </section>
+
+  <!-- 右栏：执行 -->
+  <section class="col col-exec">
+    <div class="col-head">
+      <h2>执行</h2>
+      <span id="jobTitle" class="muted">尚未生成计划</span>
+    </div>
+
+    <div id="blockedBox" class="blocked hidden"></div>
+
+    <div class="exec-actions">
+      <button id="approveAll" class="btn-ok" disabled>全部批准</button>
+      <button id="rejectAll" class="btn-warn" disabled>全部拒绝</button>
+      <button id="runBtn" class="btn-primary" disabled>开始执行</button>
+      <button id="stopBtn" class="btn-ghost" disabled>停止</button>
+    </div>
+
+    <div class="progress-wrap">
+      <div class="progress"><div id="progressBar"></div></div>
+      <div class="progress-meta"><span id="progressText">0 / 0</span><span id="progressPct">0%</span></div>
+    </div>
+
+    <div id="stepList" class="step-list">
+      <div class="empty">选择平台并生成计划后，这里会列出每一条待执行动作。</div>
+    </div>
+  </section>
+</main>
+
+<footer class="logbar">
+  <div class="log-head">
+    <h2>实时日志</h2>
+    <div class="audit-stats" id="auditStats"></div>
+    <button id="clearLog" class="btn-link">清屏</button>
+  </div>
+  <div id="logBody" class="log-body" aria-live="polite"></div>
+</footer>
+
+<div id="toast" class="toast hidden"></div>
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><h3 id="modalTitle">详情</h3><button id="modalClose" class="btn-link">关闭</button></div>
+    <pre id="modalBody"></pre>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
