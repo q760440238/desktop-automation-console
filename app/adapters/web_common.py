@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 import asyncio
+import re
+from urllib.parse import urlparse, urlunparse
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -88,6 +90,18 @@ def _as_int(value: Any, default: int, *, low: int = 0) -> int:
         return default
 
 
+# 人机验证的特征文案：命中就说明平台在拦你，继续操作只会加重风控
+CAPTCHA_HINTS = (
+    "请完成下列验证",
+    "拖动滑块",
+    "滑动验证",
+    "按住左边滑块",
+    "人机验证",
+    "安全验证",
+    "captcha",
+)
+
+
 def _looks_closed(exc: object) -> bool:
     """判断异常是否属于「浏览器/标签页已被关闭」。"""
     text = str(exc).lower()
@@ -104,6 +118,30 @@ def _clean_candidate_name(raw: str) -> str:
                 name = head
                 break
     return name.strip(" .·-—")
+
+
+# 搜索结果里会把当前登录用户自己的主页塞进来，不是可操作对象
+_JUNK_PROFILE_RE = re.compile(r"/(user|profile|people)/(self|me)/?$", re.I)
+
+
+def _canonical_url(url: str) -> str:
+    """把 URL 归一成「协议 + 域名 + 路径」，丢掉 query / fragment。
+
+    抖音、微博的搜索结果会带一长串跟踪参数（`?enter_from=search...`），
+    不剥掉会出现三个问题：超过目标长度上限被安全策略拦、同一个人被当成多个目标、去重失效。
+    """
+    try:
+        parsed = urlparse((url or "").strip())
+    except ValueError:
+        return ""
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    path = parsed.path.rstrip("/")
+    if not path:
+        return ""
+    if _JUNK_PROFILE_RE.search(path):
+        return ""
+    return urlunparse((parsed.scheme, parsed.netloc.lower(), path, "", "", ""))
 
 
 class WebAdapter(BaseAdapter):
@@ -174,6 +212,8 @@ class WebAdapter(BaseAdapter):
         self._launch_key: tuple[str, bool] | None = None  # (实际通道, 是否有头)
         self._loop: Any = None
         self._settings: dict[str, Any] | None = None  # 最近一次 execute 传入的配置快照
+        # 同一平台的浏览器操作必须串行：手动发现和无限模式同时跑会互相打断页面
+        self._op_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------ 配置
     def _web_options(self, settings: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -549,6 +589,30 @@ class WebAdapter(BaseAdapter):
             return True
         return await self.find(page, self.login_candidates, timeout_ms=1800) is not None
 
+    async def _detect_captcha(self, page: Page) -> str:
+        """页面上是否出现了人机验证，命中返回命中的特征词。
+
+        抖音/微博的滑块验证挂在 iframe 里，只看主文档抓不到，必须把所有 frame 都扫一遍。
+        """
+        frames: list[Any] = [page]
+        try:
+            frames += [f for f in page.frames if f != page.main_frame]
+        except Exception:
+            pass
+        for frame in frames:
+            try:
+                body = await frame.locator("body").inner_text(timeout=1200)
+            except Exception:
+                continue
+            low = (body or "").lower()
+            for hint in CAPTCHA_HINTS:
+                if hint.lower() in low:
+                    return hint
+        url = (page.url or "").lower()
+        if "captcha" in url or "verify" in url:
+            return "验证页"
+        return ""
+
     async def _login_gate(self) -> ExecResult | None:
         """先回首页做一次登录判定；未登录就立即返回，不继续点任何按钮。"""
         page = await self.ensure_page(self._settings)
@@ -558,6 +622,14 @@ class WebAdapter(BaseAdapter):
             return ExecResult(
                 ok=False,
                 detail=f"未登录，请先在界面里打开浏览器登录 {self.display_name}",
+                screenshot=shot or None,
+            )
+        captcha = await self._detect_captcha(page)
+        if captcha:
+            shot = await self._shot_safe("captcha")
+            return ExecResult(
+                ok=False,
+                detail=f"{self.display_name} 弹出了人机验证（{captcha}），需要你手动完成后再试",
                 screenshot=shot or None,
             )
         return None
@@ -575,6 +647,10 @@ class WebAdapter(BaseAdapter):
         return self.build_search_url(keyword)
 
     async def discover(self, keyword: str, limit: int = 20) -> dict[str, Any]:
+        async with self._op_lock:
+            return await self._discover_impl(keyword, limit)
+
+    async def _discover_impl(self, keyword: str, limit: int = 20) -> dict[str, Any]:
         """按关键词搜索并返回候选对象（只读，不发任何消息）。
 
         返回 {"ok", "candidates":[{name,url}], "detail"}。
@@ -592,6 +668,17 @@ class WebAdapter(BaseAdapter):
             page = await self.goto(url)
             if await self._logged_out(page):
                 return {"ok": False, "detail": f"未登录，请先打开浏览器登录 {self.display_name}", "candidates": []}
+
+            captcha = await self._detect_captcha(page)
+            if captcha:
+                shot = await self._shot_safe(f"discover_captcha_{keyword}")
+                return {
+                    "ok": False,
+                    "captcha": True,
+                    "candidates": [],
+                    "detail": f"{self.display_name} 弹出了人机验证（{captcha}），需要你手动完成后重试"
+                    + (f"，截图：{shot}" if shot else ""),
+                }
 
             await page.wait_for_timeout(1500)
             # 滚一下触发懒加载，再等一会儿
@@ -611,7 +698,7 @@ class WebAdapter(BaseAdapter):
             for it in items:
                 if not isinstance(it, dict):
                     continue
-                href = str(it.get("url") or "")
+                href = _canonical_url(str(it.get("url") or ""))
                 name = _clean_candidate_name(str(it.get("name") or ""))
                 if not href or not name or href in seen:
                     continue
@@ -619,11 +706,18 @@ class WebAdapter(BaseAdapter):
                 candidates.append({"name": name, "url": href})
                 if len(candidates) >= limit:
                     break
+            if not candidates:
+                # 抓不到候选时留一张截图，方便判断是「未登录」「被风控」还是「页面改版」
+                shot = await self._shot_safe(f"discover_empty_{keyword}")
+                msg = f"「{keyword}」没有找到结果"
+                if shot:
+                    msg += f"，截图：{shot}"
+                return {"ok": True, "keyword": keyword, "candidates": [], "detail": msg}
             return {
                 "ok": True,
                 "keyword": keyword,
                 "candidates": candidates,
-                "detail": f"「{keyword}」找到 {len(candidates)} 个候选" if candidates else f"「{keyword}」没有找到结果",
+                "detail": f"「{keyword}」找到 {len(candidates)} 个候选",
             }
         except Exception as exc:
             return {"ok": False, "detail": f"搜索失败：{_short(exc)}", "candidates": []}
@@ -754,6 +848,10 @@ class WebAdapter(BaseAdapter):
 
     # ------------------------------------------------------------------ 动作
     async def execute(self, action: str, target: str, text: str, extra: dict[str, Any], ctx: Ctx) -> ExecResult:
+        async with self._op_lock:
+            return await self._execute_impl(action, target, text, extra, ctx)
+
+    async def _execute_impl(self, action: str, target: str, text: str, extra: dict[str, Any], ctx: Ctx) -> ExecResult:
         """统一入口：任何异常都转成中文失败结果，绝不外泄。"""
         self._settings = ctx.settings if ctx is not None else None
         target = (target or "").strip()

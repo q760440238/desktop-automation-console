@@ -556,6 +556,19 @@ class _TaskFormState extends State<TaskForm> {
                 ),
               ),
             ),
+          if (running)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                ap['stalled'] == true
+                    ? '⚠ 已 ${ap['idle_seconds']} 秒没有进展，可能卡住了'
+                    : '心跳：${ap['idle_seconds']} 秒前更新',
+                style: TextStyle(
+                  fontSize: 9.5,
+                  color: ap['stalled'] == true ? AppColors.danger : AppColors.muted,
+                ),
+              ),
+            ),
           if (!running && stopReason.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 3),

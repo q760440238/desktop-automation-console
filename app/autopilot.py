@@ -47,6 +47,8 @@ class AutoPilot:
             "stop_reason": "",
             "next_at": 0.0,
             "started_at": "",
+            "updated_at": 0.0,
+            "current_job": "",
             "recent": [],
         }
 
@@ -59,7 +61,14 @@ class AutoPilot:
         s = dict(self.state)
         s["running"] = self.running
         s["remain"] = max(0, int(s.get("next_at", 0) - time.time())) if s.get("next_at") else 0
+        # 心跳：界面据此判断是「在冷却」还是「真卡住了」
+        s["idle_seconds"] = int(time.time() - s["updated_at"]) if s.get("updated_at") else 0
+        # 冷却期本来就不动，不算卡住
+        s["stalled"] = bool(s["running"] and s["idle_seconds"] > 180 and s["remain"] == 0)
         return s
+
+    def _touch(self) -> None:
+        self.state["updated_at"] = time.time()
 
     def _note(self, msg: str, level: str = "info") -> None:
         recent = self.state.setdefault("recent", [])
@@ -84,6 +93,8 @@ class AutoPilot:
             raise ValueError("当前处于急停状态，无法启动")
         if platform not in PLATFORMS:
             raise ValueError("未知平台")
+        if PLATFORMS[platform]["kind"] == "desktop":
+            raise ValueError("无限模式只支持网页平台（桌面端只能搜到已有联系人，没有「找新人」的概念）")
         if action not in PLATFORMS[platform]["actions"]:
             raise ValueError(f"{PLATFORMS[platform]['name']} 不支持「{ACTION_LABELS.get(action, action)}」")
         if not (brief or "").strip():
@@ -138,12 +149,30 @@ class AutoPilot:
         self._stop.set()
         self.state["phase"] = "正在停止"
         self._note(reason)
-        try:
-            await asyncio.wait_for(self._task, timeout=10)  # type: ignore[arg-type]
-        except (asyncio.TimeoutError, asyncio.CancelledError):
-            pass
+
+        # 先把正在跑的 job 停掉，避免「点了停止但还在发」
+        job_id = self.state.get("current_job") or ""
+        if job_id:
+            try:
+                await engine.stop(job_id)
+            except Exception:
+                pass
+
+        task = self._task
+        if task is not None:
+            try:
+                # shield：等它自己收尾，超时再强杀
+                await asyncio.wait_for(asyncio.shield(task), timeout=8)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                task.cancel()
+                try:
+                    await asyncio.wait_for(task, timeout=6)
+                except BaseException:
+                    pass
+
         self.state["running"] = False
         self.state["phase"] = "已停止"
+        self.state["next_at"] = 0.0
         self.state["stop_reason"] = self.state.get("stop_reason") or reason
         return self.status()
 
@@ -166,9 +195,11 @@ class AutoPilot:
         seen: set[str] = set()
         empty_rounds = 0
         fails = 0
+        plan_fails = 0
 
         try:
             while not self._stop.is_set():
+                self._touch()
                 if engine.panic:
                     s["stop_reason"] = "急停触发"
                     break
@@ -198,10 +229,29 @@ class AutoPilot:
                 s["phase"] = "寻找目标"
                 s["detail"] = f"搜索「{keyword[:24]}」"
                 fetch = min(30, max(10, int(s.get("limit", 5)) * 4))
-                res = await adapter.discover(keyword, fetch)
+                try:
+                    # 浏览器调用必须有超时兜底：页面卡死时不能让整个循环一起卡住
+                    res = await asyncio.wait_for(adapter.discover(keyword, fetch), timeout=150)
+                except asyncio.TimeoutError:
+                    s["detail"] = "搜索超时（150 秒）"
+                    self._note("搜索超时，重置浏览器后重试", "error")
+                    empty_rounds += 1
+                    try:
+                        await adapter.close()
+                    except Exception:
+                        pass
+                    if empty_rounds >= 3:
+                        s["stop_reason"] = "连续 3 轮搜索超时，已停止（检查浏览器是否卡住或被风控）"
+                        break
+                    await self._sleep(30)
+                    continue
                 if not res.get("ok"):
                     s["detail"] = str(res.get("detail") or "搜索失败")
                     self._note(f"搜索失败：{s['detail']}", "error")
+                    if res.get("captcha"):
+                        # 验证码属于确定性阻断：重试只会加重风控，必须立刻停
+                        s["stop_reason"] = "触发人机验证，已停止（请在浏览器里手动完成验证后再启动）"
+                        break
                     empty_rounds += 1
                     if empty_rounds >= 3:
                         s["stop_reason"] = "连续 3 轮搜索失败，已停止"
@@ -232,6 +282,7 @@ class AutoPilot:
                 empty_rounds = 0
                 s["phase"] = "生成计划"
                 s["detail"] = f"{len(picked)} 个新目标"
+                self._touch()
                 try:
                     plan = engine.plan(
                         PlanRequest(
@@ -243,10 +294,17 @@ class AutoPilot:
                         )
                     )
                 except ValueError as exc:
+                    # 计划失败是「确定性失败」：同样的目标重试也不会成功，必须计数熔断，
+                    # 否则会变成每轮失败一次、永远停不下来的空转（曾经的真实 bug）。
+                    plan_fails += 1
                     s["detail"] = str(exc)
-                    self._note(f"生成计划失败：{exc}", "error")
-                    await self._sleep(s.get("interval", 120))
+                    self._note(f"生成计划失败（连续 {plan_fails} 次）：{exc}", "error")
+                    if plan_fails >= 3:
+                        s["stop_reason"] = f"连续 {plan_fails} 轮生成计划失败：{exc}"
+                        break
+                    await self._sleep(min(int(s.get("interval", 120)), 60))
                     continue
+                plan_fails = 0
 
                 job = plan["job"]
                 job_id = job["id"]
@@ -257,9 +315,12 @@ class AutoPilot:
 
                 # 2) 执行并等待结束
                 s["phase"] = "执行中"
+                s["current_job"] = job_id
+                self._touch()
                 try:
                     await engine.run(job_id)
                 except ValueError as exc:
+                    s["current_job"] = ""
                     s["detail"] = str(exc)
                     self._note(f"启动执行失败：{exc}", "error")
                     fails += 1
@@ -267,11 +328,30 @@ class AutoPilot:
                     continue
 
                 deadline = time.time() + 900
+                last_job_status = ""
                 while time.time() < deadline and not self._stop.is_set():
                     row = store.get_job_row(job_id)
+                    last_job_status = (row or {}).get("status", "")
                     if row and row["status"] in TERMINAL:
                         break
+                    self._touch()
                     await asyncio.sleep(2)
+
+                # 看门狗：超时还没结束，说明这一轮卡住了，停掉 job 并记一次失败
+                if last_job_status not in TERMINAL:
+                    try:
+                        await engine.stop(job_id)
+                    except Exception:
+                        pass
+                    fails += 1
+                    self._note(f"第 {s['round']} 轮执行超过 15 分钟未结束，已强制停止", "error")
+                    s["current_job"] = ""
+                    if fails >= 3:
+                        s["stop_reason"] = "连续 3 轮执行超时/失败，已停止"
+                        break
+                    await self._sleep(30)
+                    continue
+                s["current_job"] = ""
 
                 row = store.get_job_row(job_id) or {}
                 stats = self._job_stats(job_id)
@@ -291,6 +371,7 @@ class AutoPilot:
 
                 s["phase"] = "冷却"
                 s["detail"] = f"{s.get('interval', 120)} 秒后进入下一轮"
+                self._touch()
                 await self._sleep(s.get("interval", 120))
         except asyncio.CancelledError:
             s["stop_reason"] = s.get("stop_reason") or "任务被取消"
@@ -302,6 +383,7 @@ class AutoPilot:
             s["running"] = False
             s["phase"] = "已停止"
             s["next_at"] = 0.0
+            s["current_job"] = ""
             if s.get("stop_reason"):
                 self._note(f"停止：{s['stop_reason']}")
 

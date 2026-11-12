@@ -152,7 +152,13 @@ async def discover(body: DiscoverBody) -> dict[str, Any]:
         detail = res.get("detail") or detail
         if not res.get("ok"):
             if not collected:
-                return {"ok": False, "detail": res.get("detail"), "candidates": [], "keywords": keywords}
+                return {
+                    "ok": False,
+                    "detail": res.get("detail"),
+                    "candidates": [],
+                    "keywords": keywords,
+                    "captcha": bool(res.get("captcha")),
+                }
             break
         used.append(kw)
         for c in res.get("candidates") or []:
