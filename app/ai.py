@@ -127,6 +127,19 @@ def public_view(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
+def is_configured() -> bool:
+    """模型是否可用：有地址、有模型名、且（有 Key 或者指向本机）。"""
+    cfg = load_ai()
+    base = (cfg.get("base_url") or "").strip()
+    model = (cfg.get("model") or "").strip()
+    key = (cfg.get("api_key") or "").strip()
+    if not base or not model:
+        return False
+    if not key and "127.0.0.1" not in base and "localhost" not in base:
+        return False
+    return True
+
+
 def _request(url: str, payload: dict[str, Any] | None, api_key: str, timeout: int, method: str = "POST") -> dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
     req = urllib.request.Request(url, data=data, method=method)

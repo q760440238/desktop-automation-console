@@ -19,7 +19,7 @@ _USER_ID_RE = re.compile(r"^[0-9a-f]{24}$")
 class XiaohongshuAdapter(WebAdapter):
     platform = "xiaohongshu"
     kind = "web"
-    actions = {"follow", "send_message"}
+    actions = {"follow", "send_message", "comment"}
 
     # 按方向找人：搜索结果页里哪些链接算「人」
     discover_patterns = ("/user/profile/",)

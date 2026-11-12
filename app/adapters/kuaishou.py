@@ -17,7 +17,7 @@ _UID_RE = re.compile(r"^[0-9A-Za-z_-]{3,40}$")
 class KuaishouAdapter(WebAdapter):
     platform = "kuaishou"
     kind = "web"
-    actions = {"follow", "send_message"}
+    actions = {"follow", "send_message", "comment"}
 
     # 按方向找人：搜索结果页里哪些链接算「人」
     discover_patterns = ("/profile/",)

@@ -18,7 +18,7 @@ _UID_RE = re.compile(r"^(?:u/)?(?:uid[:：]?)?(\d{4,})$", re.IGNORECASE)
 class WeiboAdapter(WebAdapter):
     platform = "weibo"
     kind = "web"
-    actions = {"follow", "send_message"}
+    actions = {"follow", "send_message", "comment"}
 
     # 按方向找人：搜索结果页里哪些链接算「人」
     discover_patterns = ("weibo.com/u/", "weibo.com/n/")

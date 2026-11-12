@@ -193,6 +193,11 @@ class AutoPilot:
         「模型没配」而卡死。
         """
         s = self.state
+        # 没配 AI 不算「AI 失效」：走确定性兜底（empty_rounds 到 4 次才停），
+        # 否则没配置模型的用户会在两个空轮后就被掐断。
+        if not ai.is_configured():
+            return {"action": "retry", "reason": "未配置 AI 模型，按默认策略重试"}
+
         if int(s.get("ai_decisions", 0)) >= 30:
             return {"action": "stop", "reason": "AI 决策已达 30 次，为避免失控自动停止"}
 

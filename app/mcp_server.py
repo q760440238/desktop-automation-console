@@ -71,13 +71,13 @@ TOOLS: list[dict[str, Any]] = [
                 },
                 "action": {
                     "type": "string",
-                    "enum": ["send_message", "add_friend", "join_group", "follow"],
-                    "description": "动作；微信只支持 send_message，QQ 支持 add_friend/join_group/send_message，其余平台支持 follow/send_message",
+                    "enum": ["send_message", "add_friend", "join_group", "follow", "comment"],
+                    "description": "动作；微信/企业微信只支持 send_message，QQ 支持 add_friend/join_group/send_message，七个网页平台支持 follow/send_message/comment",
                 },
                 "targets": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "目标列表：好友备注/群名、QQ 号/群号、或平台主页链接/账号",
+                    "description": "目标列表：好友备注/群名、QQ 号/群号、平台主页链接/账号；comment 动作要填作品或帖子链接",
                 },
                 "message": {
                     "type": "string",

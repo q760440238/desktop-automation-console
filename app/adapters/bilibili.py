@@ -18,7 +18,7 @@ _UID_RE = re.compile(r"^(?:uid[:：]?)?(\d{3,})$", re.IGNORECASE)
 class BilibiliAdapter(WebAdapter):
     platform = "bilibili"
     kind = "web"
-    actions = {"follow", "send_message"}
+    actions = {"follow", "send_message", "comment"}
 
     # 按方向找人：搜索结果页里哪些链接算「人」
     discover_patterns = ("space.bilibili.com",)

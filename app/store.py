@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS steps (
     status TEXT NOT NULL,
     detail TEXT DEFAULT '',
     screenshot TEXT,
+    simulated INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
     started_at TEXT,
     finished_at TEXT
@@ -83,6 +84,10 @@ def conn() -> sqlite3.Connection:
             _conn.execute("PRAGMA journal_mode=WAL")
             _conn.execute("PRAGMA busy_timeout=15000")
             _conn.executescript(SCHEMA)
+            # 老库迁移：补上 simulated 列（演练不该占用真实配额）
+            cols = {r[1] for r in _conn.execute("PRAGMA table_info(steps)").fetchall()}
+            if "simulated" not in cols:
+                _conn.execute("ALTER TABLE steps ADD COLUMN simulated INTEGER DEFAULT 0")
             _conn.commit()
         return _conn
 
@@ -233,7 +238,7 @@ def usage_count(platform: str, hours: int) -> int:
     c = conn()
     row = c.execute(
         "SELECT COUNT(*) n FROM steps s JOIN jobs j ON s.job_id=j.id"
-        " WHERE j.platform=? AND s.status='ok' AND s.finished_at>=?",
+        " WHERE j.platform=? AND s.status='ok' AND COALESCE(s.simulated,0)=0 AND s.finished_at>=?",
         (platform, since),
     ).fetchone()
     return int(row["n"] if row else 0)

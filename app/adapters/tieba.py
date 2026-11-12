@@ -14,7 +14,7 @@ from .web_common import Selector, WebAdapter
 class TiebaAdapter(WebAdapter):
     platform = "tieba"
     kind = "web"
-    actions = {"follow", "send_message"}
+    actions = {"follow", "send_message", "comment"}
 
     # 按方向找人：搜索结果页里哪些链接算「人」
     discover_patterns = ("/f?kw=",)

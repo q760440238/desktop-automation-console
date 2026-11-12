@@ -17,7 +17,7 @@ _TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 class ZhihuAdapter(WebAdapter):
     platform = "zhihu"
     kind = "web"
-    actions = {"follow", "send_message"}
+    actions = {"follow", "send_message", "comment"}
 
     # 按方向找人：搜索结果页里哪些链接算「人」
     discover_patterns = ("/people/",)

@@ -261,9 +261,12 @@ class Engine:
                     status="ok" if res.ok else "failed",
                     detail=res.detail,
                     screenshot=res.screenshot,
+                    simulated=1 if res.simulated else 0,
                     finished_at=store.now_iso(),
                 )
-                store.touch_contact(platform, s["target"], action, "ok" if res.ok else "failed")
+                # 演练不写联系人：否则会把 7 天去重窗口提前占掉，真实跑时全被判「已联系过」
+                if not res.simulated:
+                    store.touch_contact(platform, s["target"], action, "ok" if res.ok else "failed")
                 results["ok" if res.ok else "failed"] += 1
                 store.add_event(
                     "info" if res.ok else "error",
@@ -295,6 +298,7 @@ class Engine:
                 job_id=job_id,
             )
             self._cancel.pop(job_id, None)
+            self._tasks.pop(job_id, None)  # 否则 _tasks 会随任务数一直增长
 
     # ------------------------------------------------------------ 视图
     def view(self, job_id: str) -> dict[str, Any]:
