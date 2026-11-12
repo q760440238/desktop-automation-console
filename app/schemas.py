@@ -110,6 +110,8 @@ class PlanRequest(BaseModel):
     message: str = ""
     mode: JobMode | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
+    # 勾选后：先关注该用户，再发送消息（仅网页平台且该平台支持关注）
+    auto_follow: bool = False
 
 
 class ApproveRequest(BaseModel):

@@ -320,6 +320,7 @@ class _TaskFormState extends State<TaskForm> {
 
   // ---- 无限模式 ----
   bool _infinite = false;
+  bool _autoFollow = false;
   final _autoBrief = TextEditingController();
   int _autoLimit = 3;
   int _autoInterval = 60;
@@ -421,6 +422,24 @@ class _TaskFormState extends State<TaskForm> {
                   _autoRounds,
                   running ? null : (v) => setState(() => _autoRounds = v),
                   _autoRounds == 0 ? '不限' : '轮',
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: Checkbox(
+                    value: _autoFollow,
+                    onChanged: running
+                        ? null
+                        : (v) => setState(() => _autoFollow = v ?? false),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                    activeColor: AppColors.warn,
+                  ),
+                ),
+                const Text(
+                  '同时关注',
+                  style: TextStyle(fontSize: 10.5, color: AppColors.textDim),
                 ),
               ],
             ),
@@ -565,7 +584,9 @@ class _TaskFormState extends State<TaskForm> {
                     : '心跳：${ap['idle_seconds']} 秒前更新',
                 style: TextStyle(
                   fontSize: 9.5,
-                  color: ap['stalled'] == true ? AppColors.danger : AppColors.muted,
+                  color: ap['stalled'] == true
+                      ? AppColors.danger
+                      : AppColors.muted,
                 ),
               ),
             ),
@@ -655,6 +676,7 @@ class _TaskFormState extends State<TaskForm> {
       interval: _autoInterval,
       limit: _autoLimit,
       maxRounds: _autoRounds,
+      autoFollow: _autoFollow,
     );
     if (!mounted) return;
     setState(() => _status = err ?? '无限模式已启动');
@@ -1097,7 +1119,11 @@ class _TaskFormState extends State<TaskForm> {
 
   Future<void> _plan() async {
     setState(() => _status = '正在校验…');
-    final err = await widget.state.planNow(_targetList, _message.text);
+    final err = await widget.state.planNow(
+      _targetList,
+      _message.text,
+      autoFollow: _autoFollow,
+    );
     if (!mounted) return;
     setState(
       () => _status = err ?? '已生成 ${widget.state.job?.steps.length ?? 0} 条，待审批',
@@ -1237,6 +1263,48 @@ class _TaskFormState extends State<TaskForm> {
                           color: AppColors.muted,
                           height: 1.5,
                         ),
+                      ),
+                    ),
+                  if (p != null &&
+                      !p.isDesktop &&
+                      p.actions.contains('follow') &&
+                      state.action == 'send_message')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: Checkbox(
+                              value: _autoFollow,
+                              onChanged: (v) =>
+                                  setState(() => _autoFollow = v ?? false),
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              visualDensity: VisualDensity.compact,
+                              activeColor: AppColors.accent,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Text(
+                            '关注后再发送',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: AppColors.textDim,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              '先关注对方再发私信；多一次平台操作，间隔会自动放慢',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: AppColors.muted,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                 ],

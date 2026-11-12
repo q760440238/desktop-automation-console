@@ -38,6 +38,7 @@ class AutoPilot:
             "brief": "",
             "message": "",
             "action": "send_message",
+            "auto_follow": False,
             "round": 0,
             "max_rounds": 0,
             "sent": 0,
@@ -92,6 +93,7 @@ class AutoPilot:
         interval: int = 120,
         limit: int = 5,
         max_rounds: int = 0,
+        auto_follow: bool = False,
     ) -> dict[str, Any]:
         if self.running:
             raise ValueError("无限模式已经在运行了")
@@ -123,6 +125,7 @@ class AutoPilot:
             "max_rounds": int(max_rounds or 0),
             "interval": max(30, min(int(interval or 120), 3600)),
             "limit": max(1, min(int(limit or 5), 10)),
+            "auto_follow": bool(auto_follow),
             "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "phase": "启动中",
             "simulation": bool(cfg.get("simulation", True)),
@@ -420,6 +423,7 @@ class AutoPilot:
                             targets=picked,
                             message=s["message"],
                             mode="auto",
+                            auto_follow=bool(s.get("auto_follow")),
                         )
                     )
                 except ValueError as exc:

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 from typing import Any
 
@@ -91,7 +92,11 @@ class Engine:
         if mode == "auto" and not cfg.get("safety", {}).get("require_approval", True):
             status = "queued"
 
-        job_id = store.insert_job(req.platform, action, mode, status, req.message, req.extra)
+        extra = dict(req.extra or {})
+        support_follow = "follow" in PLATFORMS.get(req.platform, {}).get("actions", [])
+        if req.auto_follow and support_follow and action == "send_message":
+            extra["auto_follow"] = True
+        job_id = store.insert_job(req.platform, action, mode, status, req.message, extra)
         store.insert_steps(job_id, step_rows)
         store.add_event(
             "info",
@@ -195,6 +200,11 @@ class Engine:
         lim = limits_for(platform, cfg)
         simulated = ctx.simulation or adapter is None
 
+        try:
+            job_extra = json.loads(job["extra"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            job_extra = {}
+
         store.set_job_status(job_id, "running", started=True)
         store.add_event(
             "info",
@@ -236,9 +246,9 @@ class Engine:
                     if adapter is None:
                         res = ExecResult(ok=False, detail=f"平台 {platform} 适配器缺失")
                     elif ctx.simulation:
-                        res = adapter.simulate(action, s["target"], send_text, cfg.get("extra", {}))
+                        res = adapter.simulate(action, s["target"], send_text, job_extra)
                     else:
-                        res = await adapter.execute(action, s["target"], send_text, {}, ctx)
+                        res = await adapter.execute(action, s["target"], send_text, job_extra, ctx)
                 except Exception as exc:  # 适配器异常不应中断整批
                     res = ExecResult(ok=False, detail=f"适配器异常：{exc}")
 
@@ -262,7 +272,10 @@ class Engine:
                     if simulated:
                         delay = random.uniform(0.25, 0.7)
                     else:
-                        delay = random.uniform(float(lim.get("delay_min", 5)), float(lim.get("delay_max", 12)))
+                        lo, hi = float(lim.get("delay_min", 5)), float(lim.get("delay_max", 12))
+                        if job_extra.get("auto_follow"):
+                            lo, hi = lo * 1.5, hi * 1.5
+                        delay = random.uniform(lo, hi)
                     try:
                         await asyncio.wait_for(ev.wait(), timeout=min(delay, 60))
                     except asyncio.TimeoutError:

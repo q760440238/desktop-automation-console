@@ -392,12 +392,14 @@ class ApiClient {
     required String action,
     required List<String> targets,
     required String message,
+    bool autoFollow = false,
   }) async =>
       await _send('POST', '/plan', {
             'platform': platform,
             'action': action,
             'targets': targets,
             'message': message,
+            'auto_follow': autoFollow,
           })
           as Map<String, dynamic>;
 

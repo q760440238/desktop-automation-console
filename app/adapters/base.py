@@ -85,8 +85,8 @@ class BaseAdapter:
             "follow": "关注",
         }.get(action, action)
         time.sleep(0.05)
-        return ExecResult(
-            ok=True,
-            simulated=True,
-            detail=f"【演练】已{verb} → {target}",
-        )
+        if extra.get("auto_follow") and action == "send_message":
+            detail = f"【演练】已关注并{verb} → {target}"
+        else:
+            detail = f"【演练】已{verb} → {target}"
+        return ExecResult(ok=True, simulated=True, detail=detail)

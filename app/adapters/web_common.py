@@ -882,9 +882,19 @@ class WebAdapter(BaseAdapter):
             gate = await self._login_gate()
             if gate is not None:
                 return gate
+
+            # 「关注后再发送」：先关注同一个人，再发消息。一次会话里完成，少一次页面往返。
+            follow_note = ""
+            if action == "send_message" and extra.get("auto_follow") and "follow" in self.actions:
+                fres = await self._do_follow(target, extra)
+                follow_note = "已关注" if fres.ok else f"未关注（{(fres.detail or '')[:40]}）"
+
             if action == "follow":
                 return await self._do_follow(target, extra)
-            return await self._do_send_message(target, text or "", extra)
+            res = await self._do_send_message(target, text or "", extra)
+            if follow_note:
+                res.detail = f"{follow_note} · {res.detail}"
+            return res
         except Exception as exc:
             shot = await self._shot_safe(f"{action}_error")
             return ExecResult(
@@ -910,6 +920,11 @@ class WebAdapter(BaseAdapter):
             return ExecResult(ok=True, detail=f"已关注 {target}")
 
         clicked = await self.click_first(page, self.follow_candidates, timeout_ms=web["action_timeout_ms"])
+        if not clicked and self.more_candidates:
+            # 关注按钮也可能收在「更多」菜单里（知乎等）
+            if await self.click_first(page, self.more_candidates, timeout_ms=4000):
+                await page.wait_for_timeout(700)
+                clicked = await self.click_first(page, self.follow_candidates, timeout_ms=4000)
         if not clicked:
             shot = await self._shot_safe(f"follow_fail_{target}")
             return ExecResult(

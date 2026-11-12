@@ -145,7 +145,11 @@ class AppState extends ChangeNotifier {
   }
 
   /// 生成计划；成功返回 null，失败返回错误文案。
-  Future<String?> planNow(List<String> targets, String message) async {
+  Future<String?> planNow(
+    List<String> targets,
+    String message, {
+    bool autoFollow = false,
+  }) async {
     if (targets.isEmpty) return '请至少填写一个目标';
     if (action == 'send_message' && message.trim().isEmpty) return '发消息需要填写文案';
     busy = true;
@@ -156,6 +160,7 @@ class AppState extends ChangeNotifier {
         action: action,
         targets: targets,
         message: message,
+        autoFollow: autoFollow,
       );
       job = JobInfo.fromJson(res['job'] as Map<String, dynamic>);
       plan = ((res['plan'] as List?) ?? const [])
@@ -310,6 +315,7 @@ class AppState extends ChangeNotifier {
     int interval = 120,
     int limit = 5,
     int maxRounds = 0,
+    bool autoFollow = false,
   }) async {
     try {
       autopilot = await api.autoStart({
@@ -320,6 +326,7 @@ class AppState extends ChangeNotifier {
         'interval': interval,
         'limit': limit,
         'max_rounds': maxRounds,
+        'auto_follow': autoFollow,
       });
       _safeNotify();
       return null;
