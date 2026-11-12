@@ -83,6 +83,7 @@ class BaseAdapter:
             "add_friend": "发送好友申请",
             "join_group": "申请加群",
             "follow": "关注",
+            "comment": "发表留言",
         }.get(action, action)
         time.sleep(0.05)
         if extra.get("auto_follow") and action == "send_message":

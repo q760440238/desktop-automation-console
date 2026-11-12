@@ -180,6 +180,24 @@ class WebAdapter(BaseAdapter):
         {"role": "button", "name": "发送", "exact": True},
         {"css": 'button:has-text("发送")'},
     ]
+
+    # ---- 留言（评论） ----
+    # 目标是作品/视频/帖子链接；进页后往下滚到评论区再填
+    comment_input_candidates: list[Selector] = [
+        {"css": 'textarea[placeholder*="评论"]'},
+        {"css": 'textarea[placeholder*="说点"]'},
+        {"css": '[contenteditable="true"][data-placeholder]'},
+        {"css": 'textarea'},
+        {"css": '[contenteditable="true"]'},
+        {"role": "textbox"},
+    ]
+    comment_send_candidates: list[Selector] = [
+        {"role": "button", "name": "发送", "exact": True},
+        {"role": "button", "name": "发布", "exact": True},
+        {"role": "button", "name": "评论", "exact": True},
+        {"css": 'button:has-text("发送")'},
+        {"css": 'button:has-text("发布")'},
+    ]
     # 明确的不可发送提示（命中即判定失败，且不重试）
     blocked_hints: tuple[str, ...] = (
         "需要互相关注",
@@ -891,6 +909,8 @@ class WebAdapter(BaseAdapter):
 
             if action == "follow":
                 return await self._do_follow(target, extra)
+            if action == "comment":
+                return await self._do_comment(target, text or "", extra)
             res = await self._do_send_message(target, text or "", extra)
             if follow_note:
                 res.detail = f"{follow_note} · {res.detail}"
@@ -942,6 +962,83 @@ class WebAdapter(BaseAdapter):
         return ExecResult(
             ok=False,
             detail=f"点击关注后未出现「已关注」状态，可能被风控或需要验证，截图：{shot or '（截图失败）'}",
+            screenshot=shot or None,
+            retryable=True,
+        )
+
+    async def _do_comment(self, target: str, text: str, extra: dict[str, Any]) -> ExecResult:
+        """留言：打开作品/帖子 → 滚到评论区 → 填内容 → 提交 → 校验是否出现。"""
+        web = self._web_options()
+        page = await self.ensure_page(self._settings)
+        page = await self._open_target(page, target, need_profile=True)
+        await page.wait_for_timeout(1200)
+
+        # 评论区一般在页面下方，滚两次触发加载
+        for _ in range(2):
+            try:
+                await page.mouse.wheel(0, 1200)
+            except Exception:
+                break
+            await page.wait_for_timeout(800)
+
+        reason = await self._blocked_reason(page)
+        if reason:
+            shot = await self._shot_safe(f"comment_blocked_{target}")
+            return ExecResult(False, f"无法在 {target} 留言：{reason}", screenshot=shot or None)
+
+        message = await self._render_text(page, text, target)
+        box = await self._type_into(page, self.comment_input_candidates, message, timeout_ms=8000)
+        if box is None:
+            shot = await self._shot_safe(f"comment_noinput_{target}")
+            return ExecResult(
+                False,
+                f"没找到评论输入框，可能页面改版或需要登录，截图：{shot or '（截图失败）'}",
+                screenshot=shot or None,
+                retryable=True,
+            )
+
+        sent = await self.click_first(page, self.comment_send_candidates, timeout_ms=4000)
+        if not sent:
+            # 多数站点支持 Ctrl+Enter 提交评论
+            try:
+                await box.press("Control+Enter")
+                sent = True
+            except Exception:
+                sent = False
+        await page.wait_for_timeout(1500)
+
+        reason = await self._blocked_reason(page)
+        if reason:
+            shot = await self._shot_safe(f"comment_refused_{target}")
+            return ExecResult(False, f"留言未能发布：{reason}", screenshot=shot or None)
+
+        # 校验：输入框被清空，或页面上出现了这段文字
+        verified = False
+        try:
+            remain = (await box.inner_text(timeout=1500)) or ""
+            if not remain.strip():
+                verified = True
+        except Exception:
+            pass
+        if not verified:
+            try:
+                verified = await page.get_by_text(message[:20], exact=False).first.is_visible(timeout=2000)
+            except Exception:
+                verified = False
+
+        shot = await self._shot_safe(f"comment_{target}")
+        if verified:
+            return ExecResult(True, f"已在 {target} 发表留言", screenshot=shot or None)
+        if sent:
+            return ExecResult(
+                False,
+                f"已点击提交但没确认到评论出现，请人工核对，截图：{shot or '（截图失败）'}",
+                screenshot=shot or None,
+                retryable=True,
+            )
+        return ExecResult(
+            False,
+            f"没找到提交按钮，留言未发出，截图：{shot or '（截图失败）'}",
             screenshot=shot or None,
             retryable=True,
         )

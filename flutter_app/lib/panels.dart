@@ -1166,7 +1166,7 @@ class _TaskFormState extends State<TaskForm> {
     final state = widget.state;
     final p = state.current;
     final counts = state.limitsFor(p?.key ?? '');
-    final needMessage = state.action == 'send_message';
+    final needMessage = state.action == 'send_message' || state.action == 'comment';
 
     // 换平台后清掉上一个平台的候选，避免把 A 站的人发到 B 站
     if (_candPlatform.isNotEmpty && p != null && p.key != _candPlatform) {

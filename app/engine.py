@@ -67,7 +67,7 @@ class Engine:
         if action not in supported:
             raise ValueError(f"{PLATFORMS.get(req.platform, {}).get('name', req.platform)} 不支持「{ACTION_LABELS.get(action, action)}」")
 
-        if action == "send_message":
+        if action in ("send_message", "comment"):
             ok, why = guard.message_health(req.platform, req.message)
             if not ok:
                 raise ValueError(why)
@@ -77,7 +77,11 @@ class Engine:
         step_rows: list[dict[str, Any]] = []
         for t in targets:
             allowed, reason, risk = guard.evaluate(req.platform, action, t, cfg)
-            text = guard.render_message(req.message, t, keep_nick=True) if action == "send_message" else ""
+            text = (
+                guard.render_message(req.message, t, keep_nick=True)
+                if action in ("send_message", "comment")
+                else ""
+            )
             plan_rows.append(
                 {"target": t, "action": action, "risk": risk, "allowed": allowed, "reason": reason, "text": text}
             )
@@ -94,7 +98,7 @@ class Engine:
 
         extra = dict(req.extra or {})
         support_follow = "follow" in PLATFORMS.get(req.platform, {}).get("actions", [])
-        if req.auto_follow and support_follow and action == "send_message":
+        if req.auto_follow and support_follow and action in ("send_message", "comment"):
             extra["auto_follow"] = True
         job_id = store.insert_job(req.platform, action, mode, status, req.message, extra)
         store.insert_steps(job_id, step_rows)

@@ -9,7 +9,7 @@ Platform = Literal[
     "wechat", "wecom", "qq", "douyin", "kuaishou",
     "weibo", "bilibili", "xiaohongshu", "zhihu", "tieba",
 ]
-ActionType = Literal["send_message", "add_friend", "join_group", "follow"]
+ActionType = Literal["send_message", "add_friend", "join_group", "follow", "comment"]
 JobMode = Literal["dry_run", "confirm", "auto"]
 
 PLATFORMS: dict[str, dict[str, Any]] = {
@@ -40,7 +40,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
     "douyin": {
         "name": "抖音",
         "kind": "web",
-        "actions": ["follow", "send_message"],
+        "actions": ["follow", "send_message", "comment"],
         "target_label": "用户主页链接 / 抖音号",
         "hint": "网页版需先手动登录一次，登录态保存在本地浏览器配置目录。",
         "color": "#FE2C55",
@@ -48,7 +48,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
     "kuaishou": {
         "name": "快手",
         "kind": "web",
-        "actions": ["follow", "send_message"],
+        "actions": ["follow", "send_message", "comment"],
         "target_label": "用户主页链接 / 快手号",
         "hint": "网页版需先手动登录一次；私信入口在对方主页，部分账号未开放。",
         "color": "#FF4906",
@@ -56,7 +56,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
     "weibo": {
         "name": "微博",
         "kind": "web",
-        "actions": ["follow", "send_message"],
+        "actions": ["follow", "send_message", "comment"],
         "target_label": "用户主页链接 / 微博 UID",
         "hint": "网页版私信需要双方互相关注或对方开启接收，失败会如实记录。",
         "color": "#E6162D",
@@ -64,7 +64,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
     "bilibili": {
         "name": "B站",
         "kind": "web",
-        "actions": ["follow", "send_message"],
+        "actions": ["follow", "send_message", "comment"],
         "target_label": "空间链接 / UID",
         "hint": "私信入口在消息页，部分账号关闭了陌生人私信。",
         "color": "#FB7299",
@@ -72,7 +72,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
     "xiaohongshu": {
         "name": "小红书",
         "kind": "web",
-        "actions": ["follow", "send_message"],
+        "actions": ["follow", "send_message", "comment"],
         "target_label": "用户主页链接 / 小红书号",
         "hint": "网页版风控较严，建议降低频率并开启人工确认。",
         "color": "#FF2442",
@@ -80,7 +80,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
     "zhihu": {
         "name": "知乎",
         "kind": "web",
-        "actions": ["follow", "send_message"],
+        "actions": ["follow", "send_message", "comment"],
         "target_label": "用户主页链接 / 知乎ID",
         "hint": "私信入口常藏在「更多」菜单里，系统会自动展开再试一次。",
         "color": "#0084FF",
@@ -88,7 +88,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
     "tieba": {
         "name": "贴吧",
         "kind": "web",
-        "actions": ["follow", "send_message"],
+        "actions": ["follow", "send_message", "comment"],
         "target_label": "贴吧名 / 吧链接",
         "hint": "「关注」的对象是吧（如「显卡吧」）；私信依赖百度站内信，部分账号不可用。",
         "color": "#3385FF",
@@ -100,6 +100,7 @@ ACTION_LABELS: dict[str, str] = {
     "add_friend": "加好友",
     "join_group": "加群",
     "follow": "关注",
+    "comment": "留言",
 }
 
 
