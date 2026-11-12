@@ -706,18 +706,33 @@ class WebAdapter(BaseAdapter):
                 candidates.append({"name": name, "url": href})
                 if len(candidates) >= limit:
                     break
+            try:
+                page_title = (await page.title())[:80]
+            except Exception:
+                page_title = ""
+            page_url = page.url or ""
+
             if not candidates:
                 # 抓不到候选时留一张截图，方便判断是「未登录」「被风控」还是「页面改版」
                 shot = await self._shot_safe(f"discover_empty_{keyword}")
                 msg = f"「{keyword}」没有找到结果"
                 if shot:
                     msg += f"，截图：{shot}"
-                return {"ok": True, "keyword": keyword, "candidates": [], "detail": msg}
+                return {
+                    "ok": True,
+                    "keyword": keyword,
+                    "candidates": [],
+                    "detail": msg,
+                    "url": page_url,
+                    "title": page_title,
+                }
             return {
                 "ok": True,
                 "keyword": keyword,
                 "candidates": candidates,
                 "detail": f"「{keyword}」找到 {len(candidates)} 个候选",
+                "url": page_url,
+                "title": page_title,
             }
         except Exception as exc:
             return {"ok": False, "detail": f"搜索失败：{_short(exc)}", "candidates": []}

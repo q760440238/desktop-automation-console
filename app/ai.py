@@ -259,6 +259,113 @@ SYSTEM_PROMPT = (
 )
 
 
+RECOVERY_ACTIONS = ("retry", "switch_keyword", "reload", "wait", "stop")
+
+RECOVERY_SYSTEM = (
+    "你是社交自动化任务的巡检员。你会收到一次「没有进展」的诊断信息，"
+    "请判断最可能的真实原因，并从下面五个动作里选一个最合适的：\n"
+    "- retry：原样重试（偶发抖动）\n"
+    "- switch_keyword：换个搜索词再试（当前方向搜不到人/结果不相关），需要给出 keywords（1-3 个短词）\n"
+    "- reload：重启浏览器或重新加载页面（页面卡住、白屏、渲染异常）\n"
+    "- wait：等一段时间再说（触发频控、需要冷却），需要给出 wait_seconds（30-600）\n"
+    "- stop：必须人工介入（验证码、登录失效、账号受限）或方向本身不可行\n"
+    "判断要保守：拿不准就选 stop，不要假装能绕过验证码。\n"
+    "特别地：page_title / page_url 里出现「登录」「注册」「验证」「安全」字样时，说明需要人工登录，必须选 stop；"
+    "tried_keywords 里已经出现过的词不要重复给出。\n"
+    '只输出 JSON：{"diagnosis":"一句话原因","action":"...","keywords":["..."],"wait_seconds":0,"reason":"给用户看的一句话"}'
+)
+
+
+def _extract_json(text: str) -> dict[str, Any] | None:
+    """从模型输出里抠出第一个 JSON 对象，兼容 ```json 包裹和前后废话。"""
+    if not text:
+        return None
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        obj = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def decide_recovery(context: dict[str, Any]) -> dict[str, Any]:
+    """让模型判断「卡住/没进展」的原因并给出下一步动作。
+
+    动作是封闭集合，模型不能发明新操作；输出不是 JSON 时会重问一次，
+    仍然失败则返回 ok=False，由调用方熔断（而不是盲目重试）。
+    """
+    cfg = load_ai()
+    base = (cfg.get("base_url") or "").rstrip("/")
+    key = cfg.get("api_key") or ""
+    model = (cfg.get("model") or "").strip()
+    if not base or not model:
+        return {"ok": False, "detail": "未配置 AI 模型"}
+
+    user_msg = json.dumps(context, ensure_ascii=False)[:3000]
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": RECOVERY_SYSTEM},
+        {"role": "user", "content": user_msg},
+    ]
+
+    parsed: dict[str, Any] | None = None
+    last_err = ""
+    for attempt in range(2):
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.2 if attempt == 0 else 0.0,
+            "stream": False,
+            "max_tokens": 300,
+        }
+        res = _request(f"{base}/chat/completions", payload, key, min(int(cfg.get("timeout", 60)), 45))
+        if not res.get("ok"):
+            return {"ok": False, "detail": res.get("detail", "调用失败")}
+        data = res.get("data") or {}
+        try:
+            text = (data["choices"][0]["message"]["content"] or "").strip()
+        except (KeyError, IndexError, TypeError):
+            return {"ok": False, "detail": "返回结构异常"}
+
+        parsed = _extract_json(text)
+        if parsed is not None:
+            break
+        last_err = text[:120] or "空回复"
+        # 重问一次：把它的散文答案丢回去，要求只给 JSON
+        messages = [
+            {"role": "system", "content": RECOVERY_SYSTEM},
+            {"role": "user", "content": user_msg},
+            {"role": "assistant", "content": text[:600]},
+            {"role": "user", "content": "上面不是合法 JSON。请只输出一个 JSON 对象，不要解释、不要 Markdown。"},
+        ]
+
+    if parsed is None:
+        return {"ok": False, "detail": f"模型两次都没有输出 JSON（{last_err}）"}
+
+    action = str(parsed.get("action") or "").strip().lower()
+    if action not in RECOVERY_ACTIONS:
+        return {"ok": False, "detail": f"动作不在允许范围：{action}"}
+
+    kws = [str(k).strip() for k in (parsed.get("keywords") or []) if str(k).strip()][:3]
+    try:
+        wait_s = int(parsed.get("wait_seconds") or 0)
+    except (TypeError, ValueError):
+        wait_s = 0
+    wait_s = max(30, min(wait_s, 600)) if action == "wait" else 0
+    if action == "switch_keyword" and not kws:
+        action = "retry"
+
+    return {
+        "ok": True,
+        "action": action,
+        "diagnosis": str(parsed.get("diagnosis") or "")[:120],
+        "reason": str(parsed.get("reason") or "")[:160],
+        "keywords": kws,
+        "wait_seconds": wait_s,
+    }
+
+
 SEARCH_SYSTEM = (
     "你是社交平台的搜索策略助手。用户给出一个「想找什么样的人/吧」的方向描述，"
     "你要输出 2-3 个适合在该平台搜索框里直接输入的关键词或短句，尽量具体、可被检索到。"

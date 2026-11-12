@@ -27,6 +27,7 @@ class AutoPilot:
         self._task: asyncio.Task[Any] | None = None
         self._stop = asyncio.Event()
         self.state: dict[str, Any] = self._blank_state()
+        self._recovery_cache: dict[str, dict[str, Any]] = {}
 
     @staticmethod
     def _blank_state() -> dict[str, Any]:
@@ -49,6 +50,11 @@ class AutoPilot:
             "started_at": "",
             "updated_at": 0.0,
             "current_job": "",
+            "empty_rounds": 0,
+            "ai_decisions": 0,
+            "ai_fail_streak": 0,
+            "last_ai": None,
+            "tried_keywords": [],
             "recent": [],
         }
 
@@ -138,6 +144,7 @@ class AutoPilot:
         except Exception:
             self.state["keywords"] = [brief.strip()]
         self._note("本轮关键词：" + " / ".join(self.state["keywords"][:3]))
+        self.state["tried_keywords"] = list(self.state["keywords"])
 
         self._task = asyncio.create_task(self._loop())
         return self.status()
@@ -175,6 +182,128 @@ class AutoPilot:
         self.state["next_at"] = 0.0
         self.state["stop_reason"] = self.state.get("stop_reason") or reason
         return self.status()
+
+    async def _recover(self, stage: str, detail: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        """让 AI 判断这次没进展的原因，并给出下一步动作。
+
+        AI 不可用时返回 retry，由调用方的确定性计数器兜底，保证永远不会因为
+        「模型没配」而卡死。
+        """
+        s = self.state
+        if int(s.get("ai_decisions", 0)) >= 30:
+            return {"action": "stop", "reason": "AI 决策已达 30 次，为避免失控自动停止"}
+
+        ctx = {
+            "platform": s.get("platform_name"),
+            "brief": s.get("brief"),
+            "round": s.get("round"),
+            "stage": stage,
+            "detail": detail[:400],
+            "keywords": s.get("keywords"),
+            "tried_keywords": s.get("tried_keywords") or [],
+            "sent": s.get("sent"),
+            "failed": s.get("failed"),
+            "no_progress_count": s.get("empty_rounds", 0),
+            "simulation": s.get("simulation"),
+            "recent": [r.get("msg") for r in (s.get("recent") or [])[-5:]],
+        }
+        if extra:
+            ctx.update(extra)
+
+        try:
+            d = await asyncio.to_thread(ai.decide_recovery, ctx)
+        except Exception as exc:  # 模型调用异常不能影响主循环
+            d = {"ok": False, "detail": str(exc)}
+        s["ai_decisions"] = int(s.get("ai_decisions", 0)) + 1
+
+        if d.get("ok"):
+            s["ai_fail_streak"] = 0
+            s["last_ai"] = {
+                "diagnosis": d.get("diagnosis"),
+                "action": d.get("action"),
+                "reason": d.get("reason"),
+                "ts": time.strftime("%H:%M:%S"),
+            }
+            self._note(
+                f"AI 诊断：{d.get('diagnosis') or '-'} → 动作 {d.get('action')}"
+                + (f"（{d.get('reason')}）" if d.get("reason") else "")
+            )
+            out = d
+        else:
+            streak = int(s.get("ai_fail_streak", 0)) + 1
+            s["ai_fail_streak"] = streak
+            if streak >= 2:
+                # AI 连续给不出决策时，继续重试就是盲目空转，直接停
+                return {
+                    "action": "stop",
+                    "reason": f"AI 连续 {streak} 次无法给出有效决策（{d.get('detail')}），为避免空转已停止",
+                }
+            out = {"action": "retry", "reason": f"AI 这次没给出有效决策（{d.get('detail')}），先重试一次"}
+            self._note(out["reason"], "warn")
+
+        self._touch()
+        return out
+
+    async def _handle_dead_end(
+        self, adapter: Any, stage: str, detail: str, extra: dict[str, Any] | None = None
+    ) -> bool:
+        """处理一次「没进展」。返回 True 表示应该停止整个循环。"""
+        s = self.state
+        s["empty_rounds"] = int(s.get("empty_rounds", 0)) + 1
+        act = await self._recover(stage, detail, extra)
+        action = act.get("action")
+
+        if action == "stop":
+            s["stop_reason"] = act.get("reason") or "AI 判断需要人工介入"
+            s["detail"] = act.get("reason") or detail
+            return True
+
+        if action == "reload":
+            try:
+                await adapter.close()
+            except Exception:
+                pass
+            s["detail"] = "已重置浏览器，准备重试"
+            await self._sleep(20)
+            return False
+
+        if action == "wait":
+            seconds = int(act.get("wait_seconds") or 120)
+            s["phase"] = "AI 建议等待"
+            s["detail"] = f"等 {seconds} 秒（{act.get('reason') or '冷却'}）"
+            await self._sleep(seconds)
+            return False
+
+        if action == "switch_keyword":
+            tried = {k.lower() for k in (s.get("tried_keywords") or [])}
+            current = {k.lower() for k in (s.get("keywords") or [])}
+            proposed = [k for k in (act.get("keywords") or []) if k]
+            fresh = [k for k in proposed if k.lower() not in tried and k.lower() not in current]
+            if not fresh:
+                # AI 给不出新词 = 这个方向确实试到头了，不能无限换词
+                s["empty_rounds"] = int(s["empty_rounds"]) + 1
+                s["detail"] = "AI 给的关键词都已经试过了"
+                self._note("AI 没有给出新关键词，判定该方向已试尽", "warn")
+                if int(s["empty_rounds"]) >= 2:
+                    s["stop_reason"] = "多个关键词都搜不到目标，方向可能不可行，建议换平台或换更具体的描述"
+                    return True
+                await self._sleep(60)
+                return False
+            s["tried_keywords"] = list(tried | current)
+            s["keywords"] = fresh
+            s["empty_rounds"] = 0
+            s["detail"] = "换关键词：" + " / ".join(fresh)
+            self._note("换关键词：" + " / ".join(fresh))
+            await self._sleep(10)
+            return False
+
+        # retry：确定性兜底，连续太多次仍然要停
+        if int(s["empty_rounds"]) >= 4:
+            s["stop_reason"] = f"连续 {s['empty_rounds']} 次没有进展，已停止"
+            return True
+        s["detail"] = f"重试中（第 {s['empty_rounds']} 次）"
+        await self._sleep(min(int(s.get("interval", 120)), 90))
+        return False
 
     async def _sleep(self, seconds: float) -> None:
         self.state["next_at"] = time.time() + seconds
@@ -234,29 +363,23 @@ class AutoPilot:
                     res = await asyncio.wait_for(adapter.discover(keyword, fetch), timeout=150)
                 except asyncio.TimeoutError:
                     s["detail"] = "搜索超时（150 秒）"
-                    self._note("搜索超时，重置浏览器后重试", "error")
-                    empty_rounds += 1
+                    self._note("搜索超时", "error")
                     try:
                         await adapter.close()
                     except Exception:
                         pass
-                    if empty_rounds >= 3:
-                        s["stop_reason"] = "连续 3 轮搜索超时，已停止（检查浏览器是否卡住或被风控）"
+                    if await self._handle_dead_end(adapter, "timeout", s["detail"]):
                         break
-                    await self._sleep(30)
                     continue
                 if not res.get("ok"):
                     s["detail"] = str(res.get("detail") or "搜索失败")
                     self._note(f"搜索失败：{s['detail']}", "error")
                     if res.get("captcha"):
-                        # 验证码属于确定性阻断：重试只会加重风控，必须立刻停
+                        # 验证码是确定性阻断，且任何模型都绕不过去：直接停，不交给 AI 赌
                         s["stop_reason"] = "触发人机验证，已停止（请在浏览器里手动完成验证后再启动）"
                         break
-                    empty_rounds += 1
-                    if empty_rounds >= 3:
-                        s["stop_reason"] = "连续 3 轮搜索失败，已停止"
+                    if await self._handle_dead_end(adapter, "search", s["detail"]):
                         break
-                    await self._sleep(60)
                     continue
 
                 picked: list[str] = []
@@ -270,13 +393,19 @@ class AutoPilot:
                     if len(picked) >= int(s.get("limit", 5)):
                         break
                 if not picked:
-                    empty_rounds += 1
                     s["detail"] = "这一轮没有新的候选"
                     self._note(f"第 {s['round']} 轮没有新候选", "warn")
-                    if empty_rounds >= 5:
-                        s["stop_reason"] = "连续 5 轮没有新目标，可能方向太窄，已停止"
+                    if await self._handle_dead_end(
+                        adapter,
+                        "empty",
+                        s["detail"],
+                        {
+                            "found": len(res.get("candidates") or []),
+                            "page_url": res.get("url"),
+                            "page_title": res.get("title"),
+                        },
+                    ):
                         break
-                    await self._sleep(s.get("interval", 120))
                     continue
 
                 empty_rounds = 0
@@ -299,10 +428,8 @@ class AutoPilot:
                     plan_fails += 1
                     s["detail"] = str(exc)
                     self._note(f"生成计划失败（连续 {plan_fails} 次）：{exc}", "error")
-                    if plan_fails >= 3:
-                        s["stop_reason"] = f"连续 {plan_fails} 轮生成计划失败：{exc}"
+                    if await self._handle_dead_end(adapter, "plan", str(exc)):
                         break
-                    await self._sleep(min(int(s.get("interval", 120)), 60))
                     continue
                 plan_fails = 0
 
@@ -324,7 +451,8 @@ class AutoPilot:
                     s["detail"] = str(exc)
                     self._note(f"启动执行失败：{exc}", "error")
                     fails += 1
-                    await self._sleep(s.get("interval", 120))
+                    if await self._handle_dead_end(adapter, "run", str(exc)):
+                        break
                     continue
 
                 deadline = time.time() + 900
@@ -360,6 +488,7 @@ class AutoPilot:
                 s["skipped"] = int(s["skipped"]) + stats["skipped"]
                 s["detail"] = f"成功 {stats['ok']} · 失败 {stats['failed']} · 跳过 {stats['skipped']}"
                 self._note(f"第 {s['round']} 轮结束：{s['detail']}")
+                s["empty_rounds"] = 0
 
                 if stats["ok"] == 0 and stats["failed"] > 0:
                     fails += 1
