@@ -103,6 +103,16 @@ def run_task(
         return ExecResult(False, f"{app} 不支持动作 {action}")
     task = tpl.format(target=target, text=text or "你好")
 
+    # 先查经验库：以前做成过的同类任务，把做法作为参考塞进提示
+    try:
+        from .. import knowledge
+
+        learned = knowledge.render(knowledge.find(platform, action, f"{target} {action}"))
+        if learned:
+            task = task + "\n\n" + learned
+    except Exception:
+        pass
+
     # 会话已经开着了就别再搜索：像「我的手机」「我的电脑」这类设备联系人搜不到
     try:
         from . import vision as win_vision

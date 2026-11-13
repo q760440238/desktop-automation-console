@@ -508,3 +508,24 @@ def draft_message(brief: str, platform: str = "", action: str = "send_message", 
             "completion": usage.get("completion_tokens"),
         },
     }
+
+def _completion(system: str, user: str, timeout: int = 120, max_tokens: int = 1500) -> str:
+    """纯文本补全（不带图），给蒸馏/总结这类任务用。"""
+    cfg = load_ai()
+    base = (cfg.get("base_url") or "").rstrip("/")
+    model = cfg.get("model") or ""
+    key = cfg.get("api_key") or ""
+    if not base or not model:
+        raise RuntimeError("没有配置 AI 模型")
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "max_tokens": max_tokens,
+    }
+    resp = _request(f"{base}/chat/completions", payload, key, timeout)
+    if not resp.get("ok"):
+        raise RuntimeError(resp.get("detail") or "模型调用失败")
+    return resp["data"]["choices"][0]["message"].get("content") or ""

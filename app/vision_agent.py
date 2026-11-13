@@ -199,6 +199,34 @@ def _locked() -> bool:
         return False
 
 
+DANGER_WORDS = (
+    "屏蔽", "拉黑", "删除", "举报", "退出", "解散", "清空", "注销",
+    "删除好友", "移出群", "转让群", "解散群", "举报该用户",
+)
+
+
+def _danger_at(hwnd: int, x: int, y: int) -> str | None:
+    """看看点击位置附近是不是危险控件；是就返回它的文字。"""
+    try:
+        from .adapters import vision as v
+
+        els = v.look(hwnd)
+    except Exception:
+        return None
+    best = None
+    for e in els:
+        if e.x - 12 <= x <= e.x + e.w + 12 and e.y - 12 <= y <= e.y + e.h + 12:
+            best = e
+            break
+    if best is None:
+        return None
+    text = v._norm(best.text)
+    for w in DANGER_WORDS:
+        if w in text:
+            return best.text
+    return None
+
+
 def _diff_score(a: Image.Image, b: Image.Image) -> float:
     """两张截图差多少：缩到 64x64 灰度后算平均绝对差，0 表示完全一样。"""
     try:
@@ -261,6 +289,15 @@ def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str
                 "detail": act.get("thought") or "",
                 "steps": trace,
             }
+
+        if kind == "click":
+            blocked = _danger_at(hwnd, int(act.get("x") or 0) + rect[0], int(act.get("y") or 0) + rect[1])
+            if blocked:
+                result = f"已拦截：这个位置是「{blocked}」，属于危险操作，换别的方式"
+                trace[-1]["result"] = result
+                history_lines.append(f"{step}. {result}")
+                time.sleep(0.6)
+                continue
 
         try:
             result = _do(act, rect)

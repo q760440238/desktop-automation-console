@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, guard, setup_tools, store, vision_agent
+from . import ai, explore, guard, knowledge, setup_tools, store, vision_agent
 from .adapters import close_all, get_adapter, health_all
 from .autopilot import autopilot
 from .engine import engine
@@ -527,5 +527,40 @@ def main() -> None:
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
+
+
+class ExploreBody(BaseModel):
+    platform: str
+    goal: str
+    action: str = ""
+    max_steps: int = 25
+
+
+@app.post("/api/explore/run")
+def explore_run(body: ExploreBody) -> dict[str, Any]:
+    """让模型自己摸索一个目标，成功后把做法蒸馏进经验库。"""
+    if body.platform not in PLATFORMS:
+        raise HTTPException(404, "未知平台")
+    if engine.panic:
+        return {"ok": False, "detail": "当前处于急停状态"}
+    try:
+        return {"ok": True, "data": explore.explore(body.platform, body.goal, body.action, body.max_steps)}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "detail": f"探索失败：{exc}"}
+
+
+@app.get("/api/knowledge")
+def knowledge_list(platform: str = "", action: str = "", q: str = "") -> dict[str, Any]:
+    """查看经验库里已经学会了什么。"""
+    entries = knowledge.find(platform, action, q, top=50) if (platform or q) else knowledge._load()
+    return {"count": len(entries), "entries": entries}
+
+
 if __name__ == "__main__":
     main()
+
+class ExploreBody(BaseModel):
+    platform: str
+    goal: str
+    action: str = ""
+    max_steps: int = 25
