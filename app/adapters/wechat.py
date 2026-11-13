@@ -10,7 +10,7 @@ import time
 from typing import Any
 
 from ..settings import detect_wechat_exe, load_settings
-from . import uia
+from . import uia, vision
 from .base import BaseAdapter, Ctx, ExecResult, shot_path
 
 PROCS = ["Weixin.exe", "WeChat.exe"]
@@ -177,6 +177,9 @@ class WechatAdapter(BaseAdapter):
         if action != "send_message":
             return ExecResult(False, f"微信暂不支持「{action}」")
         return await uia.run_sync(_send, target, text)
+
+    def see(self) -> dict[str, Any]:
+        return vision.see_window(_window)
 
     def open_login(self) -> dict[str, Any]:
         info = _window()

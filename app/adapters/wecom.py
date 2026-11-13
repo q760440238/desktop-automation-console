@@ -9,7 +9,7 @@ import time
 from typing import Any
 
 from ..settings import detect_wecom_exe
-from . import uia
+from . import uia, vision
 from .base import BaseAdapter, Ctx, ExecResult, shot_path
 
 PROCS = ["WXWork.exe"]
@@ -148,6 +148,9 @@ class WecomAdapter(BaseAdapter):
         if action != "send_message":
             return ExecResult(False, f"企业微信暂不支持「{action}」")
         return await uia.run_sync(_send, target, text)
+
+    def see(self) -> dict[str, Any]:
+        return vision.see_window(_window)
 
     def open_login(self) -> dict[str, Any]:
         info = _window()

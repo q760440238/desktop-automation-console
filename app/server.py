@@ -414,6 +414,20 @@ async def open_platform(platform: str) -> dict[str, Any]:
         return {"ok": False, "detail": f"打开失败：{exc}"}
 
 
+@app.get("/api/vision/{platform}")
+def vision_look(platform: str) -> dict[str, Any]:
+    """桌面视觉：看一眼这个平台窗口，返回 OCR 到的文字块和关键控件是否存在。"""
+    if platform not in PLATFORMS:
+        raise HTTPException(404, "未知平台")
+    adapter = get_adapter(platform)
+    see = getattr(adapter, "see", None)
+    if see is None:
+        raise HTTPException(400, f"{PLATFORMS[platform]['name']} 不支持桌面视觉（仅桌面端可用）")
+    try:
+        return {"ok": True, "data": see()}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "detail": f"视觉识别失败：{exc}"}
+
 @app.post("/api/adapters/{platform}/probe")
 async def probe(platform: str) -> dict[str, Any]:
     ad = get_adapter(platform)

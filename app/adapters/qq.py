@@ -9,7 +9,7 @@ import time
 from typing import Any
 
 from ..settings import detect_qq_exe
-from . import uia
+from . import uia, vision
 from .base import BaseAdapter, Ctx, ExecResult, shot_path
 
 PROCS = ["QQ.exe", "QQNT.exe"]
@@ -106,6 +106,17 @@ def _do(action: str, target: str, text: str) -> ExecResult:
             time.sleep(1.0)
             box = uia.find_edit(win)
             if box is None:
+                # 发之前用「看」确认会话标题确实是这个人：看错了宁可不发
+                try:
+                    ok_title, seen = vision.header_has(info.hwnd, target)
+                except Exception as exc:
+                    ok_title, seen = True, f"视觉校验异常：{exc}"
+                if not ok_title and seen and "异常" not in seen:
+                    return ExecResult(
+                        False,
+                        f"会话标题里没看到「{target}」（当前顶部文字：{seen}），已中止，避免发错人",
+                        screenshot=uia.capture(info.hwnd, shot_path("qq", f"mismatch_{target}")),
+                    )
                 # QQ NT 是 Electron，UIA 控件树为空，找不到输入框。
                 # 此时搜索→回车后焦点已在聊天输入框，直接键盘粘贴发送。
                 before = uia.capture(info.hwnd, shot)
@@ -207,6 +218,9 @@ class QQAdapter(BaseAdapter):
 
     async def execute(self, action: str, target: str, text: str, extra: dict[str, Any], ctx: Ctx) -> ExecResult:
         return await uia.run_sync(_do, action, target, text)
+
+    def see(self) -> dict[str, Any]:
+        return vision.see_window(_window)
 
     def open_login(self) -> dict[str, Any]:
         """把 QQ 召到前台：托盘里的隐藏窗口也能唤出来，实在没有就重新拉起。"""
