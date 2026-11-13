@@ -22,7 +22,13 @@ def _click_text(hwnd: int, words: tuple[str, ...], timeout: float = 8.0) -> str 
         for w in words:
             el = vis.find(els, w)
             if el is not None:
+                before = vis.capture_window(hwnd)
                 vis.click(el)
+                time.sleep(0.8)
+                after = vis.capture_window(hwnd)
+                if before.tobytes() == after.tobytes():
+                    # 没反应：可能是输入队列卡住，用 PostMessage 再试一次
+                    vis.post_click(hwnd, el.cx, el.cy)
                 return w
         time.sleep(0.8)
     return None

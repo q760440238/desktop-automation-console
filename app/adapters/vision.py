@@ -122,8 +122,33 @@ def find(els: list[Element], needle: str, exact: bool = False) -> Element | None
     return hits[0][1]
 
 
-def click(el: Element) -> None:
-    """把鼠标挪过去点一下。"""
+def post_click(hwnd: int, screen_x: int, screen_y: int) -> bool:
+    """用 PostMessage 投递一次点击（客户区坐标）。
+
+    当系统输入队列被卡住、mouse_event 落空时，这条路径往往还能生效。
+    """
+    import time as _t
+    import win32gui
+
+    r = win32gui.GetWindowRect(hwnd)
+    cx, cy = int(screen_x - r[0]), int(screen_y - r[1])
+    lp = ((cy & 0xFFFF) << 16) | (cx & 0xFFFF)
+    try:
+        win32gui.PostMessage(hwnd, 0x0200, 0, lp)  # WM_MOUSEMOVE
+        _t.sleep(0.03)
+        win32gui.PostMessage(hwnd, 0x0201, 0x0001, lp)  # WM_LBUTTONDOWN
+        _t.sleep(0.05)
+        win32gui.PostMessage(hwnd, 0x0202, 0, lp)  # WM_LBUTTONUP
+        return True
+    except Exception:
+        return False
+
+
+def click(el: Element, hwnd: int | None = None, fallback: bool = False) -> None:
+    """把鼠标挪过去点一下；fallback=True 时改用 PostMessage 投递。"""
+    if fallback and hwnd:
+        post_click(hwnd, el.cx, el.cy)
+        return
     win32api.SetCursorPos((el.cx, el.cy))
     time.sleep(0.15)
     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
