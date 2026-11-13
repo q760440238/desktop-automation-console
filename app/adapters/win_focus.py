@@ -72,16 +72,31 @@ def activate(hwnd: int) -> bool:
 
 
 def capture_window(hwnd: int):
-    """PrintWindow 直接抓窗口位图，被遮挡也能拿到正确画面；失败才退回屏幕截图。"""
+    """抓窗口画面。
+
+    顺序很重要：
+    1. 窗口在前台/可见时优先用屏幕截图（GDI），因为 QQ 这类 Electron 应用
+       的 PrintWindow 会返回不更新的缓存帧，拿去 OCR 会一直看到旧画面；
+    2. 只在屏幕截图失败（窗口被遮挡、锁屏）时才退回 PrintWindow。
+    """
     if is_locked():
-        # 锁屏时 PrintWindow 会返回旧帧，拿去 OCR 会得到过期画面，必须直接拒绝
         raise RuntimeError("屏幕已锁定，无法获取真实画面（请解锁后重试）")
+
     r = wintypes.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(r))
+    box = (r.left, r.top, r.right, r.bottom)
     w, h = r.right - r.left, r.bottom - r.top
     if w <= 0 or h <= 0:
         raise RuntimeError("窗口尺寸异常")
 
+    from PIL import ImageGrab
+
+    try:
+        return ImageGrab.grab(bbox=box, all_screens=True)
+    except Exception:
+        pass
+
+    # 兜底：PrintWindow
     try:
         import win32gui
         import win32ui
@@ -92,8 +107,7 @@ def capture_window(hwnd: int):
         bmp = win32ui.CreateBitmap()
         bmp.CreateCompatibleBitmap(src, w, h)
         mem.SelectObject(bmp)
-        ok = user32.PrintWindow(hwnd, mem.GetSafeHdc(), PW_RENDERFULLCONTENT)
-        if ok:
+        if user32.PrintWindow(hwnd, mem.GetSafeHdc(), PW_RENDERFULLCONTENT):
             info = bmp.GetInfo()
             bits = bmp.GetBitmapBits(True)
             img = Image.frombuffer(
@@ -103,13 +117,8 @@ def capture_window(hwnd: int):
             mem.DeleteDC()
             src.DeleteDC()
             win32gui.ReleaseDC(hwnd, hdc)
-            # 全黑说明没渲染出来，退回屏幕截图
-            if img.convert("L").getextrema()[1] > 8:
-                return img
+            return img
     except Exception:
         pass
 
-    activate(hwnd)
-    from PIL import ImageGrab
-
-    return ImageGrab.grab(bbox=(r.left, r.top, r.right, r.bottom), all_screens=True)
+    raise RuntimeError("拿不到窗口画面")
