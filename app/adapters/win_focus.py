@@ -93,6 +93,8 @@ def capture_window(hwnd: int):
     """
     if is_locked():
         raise RuntimeError("屏幕已锁定，无法获取真实画面（请解锁后重试）")
+    if not user32.IsWindowVisible(hwnd):
+        raise RuntimeError("目标窗口不可见（可能被最小化/隐藏到托盘），请先唤起应用")
 
     r = wintypes.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(r))
@@ -103,8 +105,16 @@ def capture_window(hwnd: int):
 
     from PIL import ImageGrab
 
+    # 屏幕截图抓的是该区域显示什么，窗口被别的程序挡住就会抓到别人。
+    # 所以先确保目标窗口在前台，再截。
     try:
-        return ImageGrab.grab(bbox=box, all_screens=True)
+        if user32.GetForegroundWindow() != hwnd:
+            activate(hwnd)
+            import time as _t
+
+            _t.sleep(0.35)
+        if user32.GetForegroundWindow() == hwnd:
+            return ImageGrab.grab(bbox=box, all_screens=True)
     except Exception:
         pass
 
