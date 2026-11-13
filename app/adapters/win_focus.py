@@ -40,33 +40,45 @@ def is_locked() -> bool:
         return False
 
 
+_last_activate: dict[int, float] = {}
+
+
 def activate(hwnd: int) -> bool:
-    """把窗口真正搬到前台（含 AttachThreadInput，绕过前台抢占限制）。"""
+    """温和地把窗口带到前台：已经在前台就不动，避免打断正在显示的对话框。"""
+    import time
+
     try:
-        if not user32.IsWindowVisible(hwnd):
-            user32.ShowWindow(hwnd, SW_SHOW)
+        if not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd):
+            return False
+
+        fg = user32.GetForegroundWindow()
+        if fg == hwnd:
+            return True
+
+        # 同一个进程的另一个窗口在前台（比如正开着对话框）→ 别抢
+        try:
+            import win32process
+
+            if fg:
+                _, fg_pid = win32process.GetWindowThreadProcessId(fg)
+                _, my_pid = win32process.GetWindowThreadProcessId(hwnd)
+                if fg_pid == my_pid:
+                    return True
+        except Exception:
+            pass
+
+        now = time.time()
+        if now - _last_activate.get(hwnd, 0) < 1.5:
+            return True
+        _last_activate[hwnd] = now
+
         if user32.IsIconic(hwnd):
             user32.ShowWindow(hwnd, SW_RESTORE)
 
-        # 先置顶再取消置顶：比单纯 SetForegroundWindow 可靠
-        user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
-        user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
-
-        fg = user32.GetForegroundWindow()
-        if fg != hwnd:
-            tid_fg = user32.GetWindowThreadProcessId(fg, None)
-            tid_me = kernel32.GetCurrentThreadId()
-            attached = False
-            try:
-                attached = bool(user32.AttachThreadInput(tid_fg, tid_me, True))
-                user32.BringWindowToTop(hwnd)
-                user32.SetForegroundWindow(hwnd)
-            finally:
-                if attached:
-                    user32.AttachThreadInput(tid_fg, tid_me, False)
-
-        time.sleep(0.35)
-        return bool(user32.GetForegroundWindow() == hwnd or user32.IsWindowVisible(hwnd))
+        # 只用最普通的前台切换，不做 TOPMOST 往返（那是把弹窗弄卡的元凶）
+        user32.SetForegroundWindow(hwnd)
+        time.sleep(0.2)
+        return True
     except Exception:
         return False
 
