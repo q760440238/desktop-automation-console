@@ -205,6 +205,65 @@ DANGER_WORDS = (
 )
 
 
+def _pid_of(hwnd: int) -> int:
+    import win32process
+
+    try:
+        return win32process.GetWindowThreadProcessId(hwnd)[1]
+    except Exception:
+        return 0
+
+
+def _windows_of_pid(pid: int) -> list[int]:
+    import win32gui
+
+    out: list[int] = []
+
+    def cb(h, _):
+        import win32process
+
+        try:
+            _, p = win32process.GetWindowThreadProcessId(h)
+        except Exception:
+            return True
+        if p == pid and win32gui.IsWindowVisible(h):
+            r = win32gui.GetWindowRect(h)
+            if (r[2] - r[0]) > 80 and (r[3] - r[1]) > 60:
+                out.append(h)
+        return True
+
+    win32gui.EnumWindows(cb, None)
+    return out
+
+
+def _pick_window(main: int) -> int:
+    """优先跟随弹出来的对话框/面板，否则回到主窗口。"""
+    import win32gui
+
+    pid = _pid_of(main)
+    wins = _windows_of_pid(pid) if pid else [main]
+    if main not in wins:
+        wins.append(main)
+
+    fg = win32gui.GetForegroundWindow()
+    if fg != main and fg in wins:
+        return fg  # 用户/程序刚把某个面板提到前台
+
+    def area(h: int) -> int:
+        r = win32gui.GetWindowRect(h)
+        return max(0, r[2] - r[0]) * max(0, r[3] - r[1])
+
+    try:
+        main_area = max(1, area(main))
+        dialogs = [w for w in wins if w != main and area(w) < main_area * 0.75]
+        if dialogs:
+            # 多个时取面积最小的那个，通常就是最上层的对话框
+            return min(dialogs, key=area)
+    except Exception:
+        pass
+    return main
+
+
 def _danger_at(hwnd: int, x: int, y: int) -> str | None:
     """看看点击位置附近是不是危险控件；是就返回它的文字。"""
     try:
@@ -242,7 +301,8 @@ def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str
     """看一步、做一步，最多 max_steps 步。dry=True 只让模型看一步，不动手。"""
     if STOP.is_set():
         return {"ok": False, "detail": "当前处于急停状态，请先解除", "steps": []}
-    rect = win32gui.GetWindowRect(hwnd)
+    cur_hwnd = _pick_window(hwnd)
+    rect = win32gui.GetWindowRect(cur_hwnd)
     trace: list[dict[str, Any]] = []
     history_lines: list[str] = []
     history = ""
@@ -252,7 +312,10 @@ def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str
             return {"ok": False, "detail": "执行途中屏幕被锁定，已中止（解锁后重试）", "steps": trace}
         if STOP.is_set():
             return {"ok": False, "detail": "已急停，视觉操作中止", "steps": trace}
-        img = _capture(rect, hwnd)
+        # 每步重新判断该看哪个窗口：弹了对话框就跟过去
+        cur_hwnd = _pick_window(hwnd)
+        rect = win32gui.GetWindowRect(cur_hwnd)
+        img = _capture(rect, cur_hwnd)
         system = SYSTEM.format(task=task, w=img.width, h=img.height)
         if history_lines:
             user = (
@@ -278,7 +341,7 @@ def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str
             return {"ok": False, "detail": f"模型没有返回 JSON：{(raw or '')[:120]}", "steps": trace}
 
         kind = str(act.get("action") or "").lower()
-        trace.append({"step": step, "thought": act.get("thought"), "action": kind})
+        trace.append({"step": step, "thought": act.get("thought"), "action": kind, "window": win32gui.GetWindowText(cur_hwnd)})
 
         if dry:
             return {"ok": True, "dry": True, "first": act, "steps": trace}
@@ -291,7 +354,7 @@ def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str
             }
 
         if kind == "click":
-            blocked = _danger_at(hwnd, int(act.get("x") or 0) + rect[0], int(act.get("y") or 0) + rect[1])
+            blocked = _danger_at(cur_hwnd, int(act.get("x") or 0) + rect[0], int(act.get("y") or 0) + rect[1])
             if blocked:
                 result = f"已拦截：这个位置是「{blocked}」，属于危险操作，换别的方式"
                 trace[-1]["result"] = result
@@ -308,7 +371,7 @@ def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str
         time.sleep(1.2)
         # 对比操作前后的画面，告诉模型这一下有没有生效
         try:
-            after_img = _capture(rect, hwnd)
+            after_img = _capture(rect, cur_hwnd)
             diff = _diff_score(img, after_img)
             if diff < 1.5:
                 change = "界面几乎没有变化（这一下可能点空了，下次换个位置或换种方式）"
