@@ -427,6 +427,8 @@ def agent_run(body: AgentRunBody) -> dict[str, Any]:
     """视觉代理：让多模态模型看着窗口一步步操作（dry=True 只看不做）。"""
     if body.platform not in PLATFORMS:
         raise HTTPException(404, "未知平台")
+    if engine.panic:
+        return {"ok": False, "detail": "当前处于急停状态，请先解除急停"}
     try:
         mod = importlib.import_module(f"app.adapters.{body.platform}")
         info = mod._window()

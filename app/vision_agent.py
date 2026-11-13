@@ -11,6 +11,7 @@ import base64
 import io
 import json
 import re
+import threading
 import time
 from typing import Any
 
@@ -24,6 +25,8 @@ except ImportError:  # pragma: no cover
     win32gui = None
 
 from . import ai
+
+STOP = threading.Event()  # 急停开关：引擎置位后视觉循环立刻退出
 
 ALLOWED = {"click", "type", "key", "scroll", "done", "fail"}
 
@@ -181,19 +184,33 @@ def _do(action: dict[str, Any], rect: tuple[int, int, int, int]) -> str:
 
 def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str, Any]:
     """看一步、做一步，最多 max_steps 步。dry=True 只让模型看一步，不动手。"""
+    if STOP.is_set():
+        return {"ok": False, "detail": "当前处于急停状态，请先解除", "steps": []}
     rect = win32gui.GetWindowRect(hwnd)
     trace: list[dict[str, Any]] = []
+    history_lines: list[str] = []
     history = ""
 
     for step in range(1, max_steps + 1):
+        if STOP.is_set():
+            return {"ok": False, "detail": "已急停，视觉操作中止", "steps": trace}
         img = _capture(rect, hwnd)
         system = SYSTEM.format(task=task, w=img.width, h=img.height)
-        user = (history or "这是第一步。") + "\n请给出下一步动作。"
+        if history_lines:
+            user = (
+                "你已经做过的动作（按顺序）：\n"
+                + "\n".join(history_lines[-6:])
+                + "\n请根据当前截图判断下一步；如果任务已经完成，用 done。"
+            )
+        else:
+            user = "这是第一步，请给出下一步动作。"
         try:
             raw = _ask(img, system, user)
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "detail": f"模型调用失败：{exc}", "steps": trace}
 
+        if STOP.is_set():
+            return {"ok": False, "detail": "已急停，视觉操作中止", "steps": trace}
         act = _extract_json(raw)
         if act is None:
             return {"ok": False, "detail": f"模型没有返回 JSON：{raw[:120]}", "steps": trace}
@@ -211,9 +228,13 @@ def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str
                 "steps": trace,
             }
 
-        result = _do(act, rect)
+        try:
+            result = _do(act, rect)
+        except Exception as exc:  # noqa: BLE001
+            trace[-1]["result"] = f"失败：{exc}"
+            return {"ok": False, "detail": f"第 {step} 步执行失败：{exc}", "steps": trace}
         trace[-1]["result"] = result
-        history = f"第 {step} 步你执行了：{result}。"
+        history_lines.append(f"{step}. {result}")
         time.sleep(1.2)
 
     return {"ok": False, "detail": f"{max_steps} 步内没完成", "steps": trace}

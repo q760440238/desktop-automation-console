@@ -35,10 +35,16 @@ class Engine:
 
     def set_panic(self, on: bool) -> bool:
         self._panic = bool(on)
-        store.add_event("error" if on else "info", "急停已触发，所有任务正在中止" if on else "急停已解除")
-        if on:
-            for ev in self._cancel.values():
-                ev.set()
+        # 急停必须能打断正在跑的视觉操作，否则它会把 10 步点完
+        try:
+            from . import vision_agent
+
+            if self._panic:
+                vision_agent.STOP.set()
+            else:
+                vision_agent.STOP.clear()
+        except Exception:
+            pass
         return self._panic
 
     def running_count(self) -> int:

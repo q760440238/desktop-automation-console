@@ -76,6 +76,19 @@ def run_task(
         return ExecResult(False, f"{app} 不支持动作 {action}")
     task = tpl.format(target=target, text=text or "你好")
 
+    # 会话已经开着了就别再搜索：像「我的手机」「我的电脑」这类设备联系人搜不到
+    try:
+        from . import vision as win_vision
+
+        already, _ = win_vision.header_has(info.hwnd, target)
+    except Exception:
+        already = False
+    if already:
+        task = (
+            f"当前右侧已经打开了与「{target}」的会话，标题已确认。"
+            f"直接从点击底部消息输入框开始，输入「{text or '你好'}」，然后回车发送。"
+        )
+
     from . import uia
 
     shot = None
