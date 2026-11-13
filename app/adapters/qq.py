@@ -17,7 +17,7 @@ TITLE_RE = r"QQ"
 
 
 def _window() -> Any:
-    return uia.find_window(PROCS, TITLE_RE)
+    return uia.find_window(PROCS, TITLE_RE, include_hidden=True)
 
 
 def _health() -> dict[str, Any]:
@@ -195,20 +195,21 @@ class QQAdapter(BaseAdapter):
         return await uia.run_sync(_do, action, target, text)
 
     def open_login(self) -> dict[str, Any]:
-        if uia.process_running(PROCS):
-            info = _window()
-            if info:
-                try:
-                    uia.focus_window(info.hwnd)
-                except Exception:
-                    pass
-                return {"ok": True, "detail": f"QQ 已在运行：{info.title}"}
-            return {"ok": True, "detail": "QQ 进程在运行，但主窗口不可见，请从托盘打开"}
+        """把 QQ 召到前台：托盘里的隐藏窗口也能唤出来，实在没有就重新拉起。"""
+        info = _window()
+        if info is not None and uia.activate(info.hwnd):
+            return {"ok": True, "detail": f"已唤起 QQ 窗口：{info.title}"}
+
         exe = detect_qq_exe()
         if not exe:
             return {"ok": False, "detail": "没找到 QQ.exe，请在 config/settings.json 里填写 desktop.qq_exe"}
-        ok = uia.launch(exe, timeout=1.0)
-        return {"ok": ok, "detail": f"已启动 {exe}" if ok else "启动失败，请手动打开 QQ"}
+        # 进程还在托盘里时，再启动一次会唤回已有实例
+        uia.launch(exe)
+        time.sleep(3.0)
+        info2 = _window()
+        if info2 is not None and uia.activate(info2.hwnd):
+            return {"ok": True, "detail": "已启动 QQ 并唤起窗口"}
+        return {"ok": False, "detail": "启动命令已发出，但仍未检测到 QQ 窗口，请手动从托盘打开"}
 
     async def probe(self) -> dict[str, Any]:
         return await uia.run_sync(_probe)

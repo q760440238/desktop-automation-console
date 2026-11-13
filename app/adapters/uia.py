@@ -62,7 +62,7 @@ class WinInfo:
         }
 
 
-def list_windows(process_names: Iterable[str] | None = None) -> list[WinInfo]:
+def list_windows(process_names: Iterable[str] | None = None, include_hidden: bool = False) -> list[WinInfo]:
     import psutil
     import win32gui
     import win32process
@@ -72,7 +72,7 @@ def list_windows(process_names: Iterable[str] | None = None) -> list[WinInfo]:
 
     def _cb(hwnd: int, _lparam: Any) -> bool:
         try:
-            if not win32gui.IsWindowVisible(hwnd):
+            if not include_hidden and not win32gui.IsWindowVisible(hwnd):
                 return True
             title = win32gui.GetWindowText(hwnd)
             if not title.strip():
@@ -96,8 +96,8 @@ def list_windows(process_names: Iterable[str] | None = None) -> list[WinInfo]:
     return out
 
 
-def find_window(process_names: Iterable[str], title_re: str = "") -> WinInfo | None:
-    wins = list_windows(process_names)
+def find_window(process_names: Iterable[str], title_re: str = "", include_hidden: bool = False) -> WinInfo | None:
+    wins = list_windows(process_names, include_hidden=include_hidden)
     if not wins:
         return None
     if title_re:
@@ -214,6 +214,33 @@ def capture(hwnd: int, path: Any) -> str | None:
         return str(path)
     except Exception:
         return None
+
+
+def activate(hwnd: int) -> bool:
+    """把窗口从托盘/最小化状态真正唤到前台，返回是否可见。"""
+    import win32con
+    import win32gui
+
+    try:
+        if not win32gui.IsWindowVisible(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+    except Exception:
+        pass
+    try:
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+    except Exception:
+        pass
+    try:
+        win32gui.BringWindowToTop(hwnd)
+    except Exception:
+        pass
+    focus_window(hwnd)
+    time.sleep(0.4)
+    try:
+        return bool(win32gui.IsWindowVisible(hwnd))
+    except Exception:
+        return False
 
 
 def dump_tree(win: Any, max_depth: int = 4, max_items: int = 80) -> list[dict[str, Any]]:

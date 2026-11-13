@@ -18,7 +18,7 @@ TITLE_RE = r"微信|WeChat|Weixin"
 
 
 def _window() -> Any:
-    return uia.find_window(PROCS, TITLE_RE)
+    return uia.find_window(PROCS, TITLE_RE, include_hidden=True)
 
 
 def _health() -> dict[str, Any]:
@@ -179,20 +179,19 @@ class WechatAdapter(BaseAdapter):
         return await uia.run_sync(_send, target, text)
 
     def open_login(self) -> dict[str, Any]:
-        if uia.process_running(PROCS):
-            info = _window()
-            if info:
-                try:
-                    uia.focus_window(info.hwnd)
-                except Exception:
-                    pass
-                return {"ok": True, "detail": f"微信已在运行：{info.title}"}
-            return {"ok": True, "detail": "微信进程在运行，但主窗口不可见，请从托盘打开"}
+        info = _window()
+        if info is not None and uia.activate(info.hwnd):
+            return {"ok": True, "detail": f"已唤起微信窗口：{info.title}"}
+
         exe = detect_wechat_exe()
         if not exe:
             return {"ok": False, "detail": "没找到 Weixin.exe，请在 config/settings.json 里填写 desktop.wechat_exe"}
-        ok = uia.launch(exe, timeout=1.0)
-        return {"ok": ok, "detail": f"已启动 {exe}" if ok else "启动失败，请手动打开微信"}
+        uia.launch(exe)
+        time.sleep(4.0)
+        info2 = _window()
+        if info2 is not None and uia.activate(info2.hwnd):
+            return {"ok": True, "detail": "已启动微信并唤起窗口，请扫码登录"}
+        return {"ok": False, "detail": "启动命令已发出，但仍未检测到微信窗口，请手动打开"}
 
     async def probe(self) -> dict[str, Any]:
         return await uia.run_sync(_probe)
