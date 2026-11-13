@@ -242,3 +242,80 @@ def _propose_once(img: Image.Image, brief: str, limit: int) -> list[dict[str, An
         if name:
             out.append({"url": name, "name": name, "snippet": str(item.get("why") or "")[:40]})
     return out
+SCAN_SYSTEM = """你在看 QQ 的联系人列表（左侧是一行行联系人）。
+已经查看过这些人：{visited}
+任务：给出列表中下一个「还没查看过」的联系人，以及点击他那一行的坐标。
+只输出 JSON：{{"name":"昵称","x":整数,"y":整数}}；如果列表里没有新的了，输出 {{"done":true}}。
+坐标是截图像素，左上角 (0,0)，右下角 ({w},{h})。点昵称所在那一行，不要点左侧导航栏。"""
+
+CARD_SYSTEM = """这是刚点开的 QQ 联系人资料卡。
+请读出并判断，只输出 JSON：
+{{"name":"昵称","gender":"男|女|未知","age":整数或0,"signature":"签名原文前20字",
+  "match":true或false,"why":"一句话说明为什么匹配/不匹配"}}
+判断标准：{brief}
+性别看资料卡上的性别图标和文字（♂男 / ♀女）。看不出来就填「未知」，match 填 false。"""
+
+
+def _click_at(rect: tuple[int, int, int, int], x: int, y: int) -> None:
+    ax, ay = rect[0] + int(x), rect[1] + int(y)
+    win32api.SetCursorPos((ax, ay))
+    time.sleep(0.2)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    time.sleep(0.08)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+
+
+def profile_scan(
+    platform: str, brief: str, want: int = 3, max_check: int = 6
+) -> list[dict[str, Any]]:
+    """逐个点开联系人资料卡，读出性别/年龄，只留下匹配的人。
+
+    这是「找女好友」这类按属性筛人的正确做法：不能从昵称猜，要看资料卡。
+    """
+    import importlib
+
+    mod = importlib.import_module(f".adapters.{platform}", __package__)
+    info = mod._window()
+    if info is None:
+        return []
+    rect = win32gui.GetWindowRect(info.hwnd)
+    visited: list[str] = []
+    found: list[dict[str, Any]] = []
+
+    for _ in range(max(1, max_check)):
+        img = _capture(rect)
+        scan = _extract_json(
+            _ask(
+                img,
+                SCAN_SYSTEM.format(
+                    visited="、".join(visited) or "（无）", w=img.width, h=img.height
+                ),
+                "现在输出下一个要查看的联系人。",
+            )
+        ) or {}
+        if scan.get("done") or "x" not in scan:
+            break
+        name = str(scan.get("name") or "").strip()
+        _click_at(rect, scan.get("x", 0), scan.get("y", 0))
+        time.sleep(1.4)
+
+        card_img = _capture(rect)
+        card = _extract_json(
+            _ask(card_img, CARD_SYSTEM.format(brief=brief), "只输出 JSON。")
+        ) or {}
+        who = str(card.get("name") or name or "").strip()
+        if who:
+            visited.append(who)
+        if card.get("match"):
+            found.append(
+                {
+                    "url": who,
+                    "name": who,
+                    "snippet": f"{card.get('gender')} {card.get('age')}岁 · {card.get('why') or ''}"[:48],
+                    "gender": card.get("gender"),
+                    "age": card.get("age"),
+                }
+            )
+            if len(found) >= want:
+                break
+    return found

@@ -81,7 +81,11 @@ class BaseAdapter:
         if not key:
             return {"ok": False, "detail": "这个平台还不支持自动找人"}
 
-        cands = await asyncio.to_thread(vision_agent.propose_targets, key, keyword or "任意好友", limit)
+        brief = keyword or "任意好友"
+        # 先逐个点开资料卡核对（能读性别/年龄等），不够再退回列表直选
+        cands = await asyncio.to_thread(vision_agent.profile_scan, key, brief, limit, min(8, max(2, limit * 2)))
+        if not cands:
+            cands = await asyncio.to_thread(vision_agent.propose_targets, key, brief, limit)
         if not cands:
             return {
                 "ok": False,
