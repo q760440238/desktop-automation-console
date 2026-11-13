@@ -628,11 +628,11 @@ class _TaskFormState extends State<TaskForm> {
     final state = widget.state;
     final p = state.current;
     if (p == null) return;
-    if (p.isDesktop) {
-      setState(() => _status = '无限模式只支持网页平台（需要站内搜索找人）');
+    if (p.isDesktop && _targetList.isEmpty) {
+      setState(() => _status = '桌面端无限模式按「目标」名单轮发，请先在目标里填好友备注/QQ 号/群名');
       return;
     }
-    if (_autoBrief.text.trim().isEmpty) {
+    if (!p.isDesktop && _autoBrief.text.trim().isEmpty) {
       setState(() => _status = '先写一句要找什么样的人');
       return;
     }
@@ -677,6 +677,7 @@ class _TaskFormState extends State<TaskForm> {
       limit: _autoLimit,
       maxRounds: _autoRounds,
       autoFollow: _autoFollow,
+      targets: _targetList,
     );
     if (!mounted) return;
     setState(() => _status = err ?? '无限模式已启动');
@@ -729,7 +730,12 @@ class _TaskFormState extends State<TaskForm> {
         const SizedBox(width: 12),
         Expanded(
           child: Text(
-            _status ?? (running ? '正在后台循环执行…' : '启动后会持续找新目标，直到你停止或触发上限'),
+            _status ??
+                (running
+                    ? '正在后台循环执行…'
+                    : (widget.state.current?.isDesktop ?? false)
+                    ? '桌面端按「目标」名单轮发，名单跑完自动停止'
+                    : '启动后会持续找新目标，直到你停止或触发上限'),
             style: const TextStyle(fontSize: 11, color: AppColors.muted),
           ),
         ),
@@ -1166,7 +1172,8 @@ class _TaskFormState extends State<TaskForm> {
     final state = widget.state;
     final p = state.current;
     final counts = state.limitsFor(p?.key ?? '');
-    final needMessage = state.action == 'send_message' || state.action == 'comment';
+    final needMessage =
+        state.action == 'send_message' || state.action == 'comment';
 
     // 换平台后清掉上一个平台的候选，避免把 A 站的人发到 B 站
     if (_candPlatform.isNotEmpty && p != null && p.key != _candPlatform) {
@@ -1313,7 +1320,7 @@ class _TaskFormState extends State<TaskForm> {
             _section(
               index: '2',
               title: '目标',
-              dim: _infinite,
+              dim: _infinite && !(widget.state.current?.isDesktop ?? false),
               trailing: Text(
                 '${_targetList.length} 个',
                 style: const TextStyle(fontSize: 10.5, color: AppColors.muted),

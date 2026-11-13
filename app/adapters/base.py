@@ -59,6 +59,23 @@ def shot_path(platform: str, tag: str) -> Path:
 
 
 class BaseAdapter:
+    # 桌面端没有「站内找陌生人」：无限模式改为按启动时给的名单轮发。
+    # 名单挂在实例上，discover() 原样返回，挑选/去重仍由白循环统一处理。
+    _pool: list[str] = []
+
+    def set_pool(self, targets: list[str]) -> None:
+        self._pool = [str(t).strip() for t in (targets or []) if str(t).strip()]
+
+    async def discover(self, keyword: str, limit: int = 20) -> dict[str, Any]:
+        """桌面端的「发现」= 从名单里取人，不做站内搜索。"""
+        pool = list(getattr(self, "_pool", []) or [])
+        if not pool:
+            return {
+                "ok": False,
+                "detail": "桌面端无限模式需要先在「目标」里填一份名单（每行一个好友备注/QQ号/群名）",
+            }
+        cands = [{"url": t, "name": t, "snippet": "名单目标"} for t in pool[: max(1, limit)]]
+        return {"ok": True, "candidates": cands, "keyword": keyword, "pool": True, "url": "名单", "title": "名单"}
     platform: str = ""
     kind: str = "generic"
     actions: set[str] = set()

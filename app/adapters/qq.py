@@ -106,7 +106,21 @@ def _do(action: str, target: str, text: str) -> ExecResult:
             time.sleep(1.0)
             box = uia.find_edit(win)
             if box is None:
-                return ExecResult(False, "没定位到 QQ 消息输入框，请点「探测」后校准", screenshot=uia.capture(info.hwnd, shot))
+                # QQ NT 是 Electron，UIA 控件树为空，找不到输入框。
+                # 此时搜索→回车后焦点已在聊天输入框，直接键盘粘贴发送。
+                before = uia.capture(info.hwnd, shot)
+                if not uia.set_clipboard(text):
+                    return ExecResult(False, "无法写入剪贴板，消息未发送", screenshot=before)
+                uia.send_keys("^v")
+                time.sleep(0.6)
+                uia.send_keys("{ENTER}")
+                time.sleep(1.0)
+                after = uia.capture(info.hwnd, shot_path("qq", f"sent_{target}"))
+                return ExecResult(
+                    True,
+                    f"已通过 QQ 向「{target}」发送 {len(text)} 字（键盘模式，已留发送前后截图，建议核对）",
+                    screenshot=after,
+                )
             try:
                 box.click_input()
             except Exception:

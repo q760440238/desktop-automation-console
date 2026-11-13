@@ -316,6 +316,7 @@ class AppState extends ChangeNotifier {
     int limit = 5,
     int maxRounds = 0,
     bool autoFollow = false,
+    List<String> targets = const [],
   }) async {
     try {
       autopilot = await api.autoStart({
@@ -327,6 +328,7 @@ class AppState extends ChangeNotifier {
         'limit': limit,
         'max_rounds': maxRounds,
         'auto_follow': autoFollow,
+        'targets': targets,
       });
       _safeNotify();
       return null;

@@ -94,6 +94,7 @@ class AutoPilot:
         limit: int = 5,
         max_rounds: int = 0,
         auto_follow: bool = False,
+        targets: list[str] | None = None,
     ) -> dict[str, Any]:
         if self.running:
             raise ValueError("无限模式已经在运行了")
@@ -101,8 +102,9 @@ class AutoPilot:
             raise ValueError("当前处于急停状态，无法启动")
         if platform not in PLATFORMS:
             raise ValueError("未知平台")
-        if PLATFORMS[platform]["kind"] == "desktop":
-            raise ValueError("无限模式只支持网页平台（桌面端只能搜到已有联系人，没有「找新人」的概念）")
+        pool = [str(t).strip() for t in (targets or []) if str(t).strip()]
+        if PLATFORMS[platform]["kind"] == "desktop" and not pool:
+            raise ValueError("桌面端的无限模式按名单轮发，请先在「目标」里填好友备注/QQ 号/群名（每行一个）")
         if action not in PLATFORMS[platform]["actions"]:
             raise ValueError(f"{PLATFORMS[platform]['name']} 不支持「{ACTION_LABELS.get(action, action)}」")
         if not (brief or "").strip():
@@ -126,6 +128,7 @@ class AutoPilot:
             "interval": max(30, min(int(interval or 120), 3600)),
             "limit": max(1, min(int(limit or 5), 10)),
             "auto_follow": bool(auto_follow),
+            "targets": pool,
             "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "phase": "启动中",
             "simulation": bool(cfg.get("simulation", True)),
@@ -148,6 +151,11 @@ class AutoPilot:
             self.state["keywords"] = [brief.strip()]
         self._note("本轮关键词：" + " / ".join(self.state["keywords"][:3]))
         self.state["tried_keywords"] = list(self.state["keywords"])
+
+        if pool:
+            ad0 = get_adapter(platform)
+            if ad0 is not None and hasattr(ad0, "set_pool"):
+                ad0.set_pool(pool)
 
         self._task = asyncio.create_task(self._loop())
         return self.status()
@@ -401,6 +409,11 @@ class AutoPilot:
                     if len(picked) >= int(s.get("limit", 5)):
                         break
                 if not picked:
+                    if res.get("pool"):
+                        # 桌面端名单跑完了，正常收工，不必让 AI 猜
+                        s["stop_reason"] = f"名单里的 {len(s.get('targets') or [])} 个对象都已处理完"
+                        s["phase"] = "已停止"
+                        break
                     s["detail"] = "这一轮没有新的候选"
                     self._note(f"第 {s['round']} 轮没有新候选", "warn")
                     if await self._handle_dead_end(

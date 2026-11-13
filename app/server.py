@@ -94,6 +94,7 @@ class AutoStartBody(BaseModel):
     limit: int = 5
     max_rounds: int = 0
     auto_follow: bool = False
+    targets: list[str] = []
 
 
 @app.get("/api/auto/status")
@@ -113,6 +114,7 @@ async def auto_start(body: AutoStartBody) -> dict[str, Any]:
             limit=body.limit,
             max_rounds=body.max_rounds,
             auto_follow=body.auto_follow,
+            targets=body.targets,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
