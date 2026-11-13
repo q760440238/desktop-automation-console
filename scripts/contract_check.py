@@ -43,6 +43,7 @@ def main() -> int:
         health = json.loads(resp.read())
 
     post("/api/settings", {"patch": {"simulation": True}})
+    created: list[str] = []
     failures: list[tuple[str, str, str]] = []
     total = 0
     try:
@@ -66,12 +67,18 @@ def main() -> int:
                     {"platform": plat["key"], "action": action, "targets": [target], "message": "契约测试"},
                 )
                 ok = bool(res.get("job"))
+                if ok:
+                    created.append(res["job"]["id"])
                 detail = str(res.get("detail", ""))
                 print(f"{plat['name']:<6} {action:<12} {'OK' if ok else 'FAIL ' + detail[:40]}")
                 if not ok:
                     failures.append((plat["key"], action, detail))
     finally:
+        # 用例产生的计划必须自己清掉，否则会在真实模式里留下一堆「测试目标」待审任务
+        for job_id in created:
+            post(f"/api/jobs/{job_id}/reject", {"all": True})
         post("/api/settings", {"patch": {"simulation": False}})
+        print(f"已清理 {len(created)} 条测试计划")
 
     print("-" * 40)
     print(f"共 {total} 个 平台×动作 组合，失败 {len(failures)}")

@@ -244,6 +244,13 @@ def usage_count(platform: str, hours: int) -> int:
     return int(row["n"] if row else 0)
 
 
+def pending_steps() -> int:
+    """全库待审批步骤数（直接 COUNT，避免只统计最近 N 个任务导致漏算）。"""
+    c = conn()
+    row = c.execute("SELECT COUNT(*) n FROM steps WHERE status='pending'").fetchone()
+    return int(row["n"] if row else 0)
+
+
 def audit_rows(limit: int = 100) -> list[dict[str, Any]]:
     c = conn()
     rows = c.execute(

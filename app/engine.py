@@ -45,10 +45,8 @@ class Engine:
         return sum(1 for t in self._tasks.values() if not t.done())
 
     def pending_count(self) -> int:
-        total = 0
-        for j in store.list_jobs(limit=50):
-            total += int(j.get("stats", {}).get("pending", 0))
-        return total
+        # 直接 COUNT：以前只扫最近 50 个任务，任务多了会漏算
+        return store.pending_steps()
 
     # ------------------------------------------------------------ 计划
     def plan(self, req: PlanRequest) -> dict[str, Any]:
@@ -171,6 +169,21 @@ class Engine:
             raise ValueError("当前是「只出计划」模式，不会执行任何动作；请切换到「确认后执行」")
         if job_id in self._tasks and not self._tasks[job_id].done():
             raise ValueError("该任务正在执行")
+
+        # 执行前预检：桌面端没启动就直接拒绝，别让每条目标都白跑一次
+        cfg_now = load_settings()
+        if not cfg_now.get("simulation", True):
+            adapter_now = get_adapter(job["platform"])
+            if adapter_now is not None and PLATFORMS.get(job["platform"], {}).get("kind") == "desktop":
+                try:
+                    h = await adapter_now.health()
+                except Exception:
+                    h = {"ready": True}
+                if not h.get("ready"):
+                    raise ValueError(
+                        f"{PLATFORMS[job['platform']]['name']}当前不可用：{h.get('detail') or '未知原因'}。"
+                        "请先在左侧点「启动应用」并登录，再执行。"
+                    )
 
         steps = store.job_steps(job_id)
         if not any(s["status"] == "approved" for s in steps):
