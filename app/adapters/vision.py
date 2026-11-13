@@ -212,3 +212,7 @@ def capture_window(hwnd: int):
     from PIL import ImageGrab
 
     return ImageGrab.grab(bbox=rect, all_screens=True)
+
+
+# ---- 稳健实现覆盖上面的简单版本（本机 win32gui 没有 PrintWindow）----
+from .win_focus import activate, capture_window  # noqa: E402,F811

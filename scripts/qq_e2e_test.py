@@ -69,7 +69,8 @@ def run_case(name: str, platform: str, action: str, target: str, message: str = 
 
 
 def main() -> int:
-    print("清理测试用的去重记录:", clear_contact("qq", "我的电脑"))
+    for t in ("我的电脑", "99999999999", "999999999"):
+        print(f"清理去重记录 {t}:", clear_contact("qq", t))
     run_case("发消息 → 我的电脑（发给自己）", "qq", "send_message", "我的电脑", "自测消息，请忽略")
     run_case("加好友 → 不存在的号码", "qq", "add_friend", "99999999999", "你好")
     run_case("加群 → 不存在的群号", "qq", "join_group", "999999999", "你好")

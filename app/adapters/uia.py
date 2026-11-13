@@ -141,23 +141,53 @@ def launch(exe: str, timeout: float = 0.0) -> bool:
 
 
 # ---------------------------------------------------------------- 输入
-def type_unicode(text: str, delay: float = 0.01) -> bool:
-    """直接把字符作为 Unicode 输入事件发出去，不经过剪贴板。
+def type_unicode(text: str, delay: float = 0.012) -> bool:
+    """用 SendInput 把字符作为 Unicode 直接打进去，不经过剪贴板。
 
-    剪贴板常被别的程序占着（自动化工具、截图工具、输入法），
-    这条路绕开它，中文也能逐字输入。
+    注意：keybd_event 的 bScan 是 8 位，中文（如 U+4E2D）放不下，
+    必须走 SendInput 的 KEYBDINPUT.wScan（16 位）。
     """
-    import win32api
-    import win32con
-
     if not text:
         return False
+
+    import ctypes
+    import time as _t
+    from ctypes import wintypes
+
+    ULONG_PTR = wintypes.WPARAM
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", wintypes.WORD),
+            ("wScan", wintypes.WORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", ULONG_PTR),
+        ]
+
+    class _INPUTunion(ctypes.Union):
+        _fields_ = [("ki", KEYBDINPUT), ("pad", ctypes.c_byte * 32)]
+
+    class INPUT(ctypes.Structure):
+        _fields_ = [("type", wintypes.DWORD), ("u", _INPUTunion)]
+
+    KEYEVENTF_UNICODE = 0x0004
+    KEYEVENTF_KEYUP = 0x0002
+    INPUT_KEYBOARD = 1
+
+    def send(code: int, up: bool) -> None:
+        flags = KEYEVENTF_UNICODE | (KEYEVENTF_KEYUP if up else 0)
+        inp = INPUT(
+            type=INPUT_KEYBOARD,
+            u=_INPUTunion(ki=KEYBDINPUT(0, code, flags, 0, 0)),
+        )
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+
     try:
         for ch in text:
-            code = ord(ch)
-            win32api.keybd_event(0, code, win32con.KEYEVENTF_UNICODE, 0)
-            win32api.keybd_event(0, code, win32con.KEYEVENTF_UNICODE | win32con.KEYEVENTF_KEYUP, 0)
-            time.sleep(delay)
+            send(ord(ch), False)
+            send(ord(ch), True)
+            _t.sleep(delay)
         return True
     except Exception:
         return False
