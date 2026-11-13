@@ -98,6 +98,19 @@ def run_task(
             return ExecResult(False, f"{app} 脚本流程异常：{exc}")
         return ExecResult(ok, f"【{app}·脚本流程】{detail}")
 
+    # 要求应用先在前台：抢焦点会让 QQ 弹窗假卡死，且之后输入会全部失效
+    try:
+        from . import win_focus
+
+        if not win_focus.is_foreground(info.hwnd):
+            return ExecResult(
+                False,
+                f"请先把{app}窗口切到最前面再执行。\n"
+                f"（程序不自动抢焦点：抢了会让{app}的弹窗假卡死，之后点哪都没反应）",
+            )
+    except Exception:
+        pass
+
     tpl = TASKS.get(action)
     if tpl is None:
         return ExecResult(False, f"{app} 不支持动作 {action}")

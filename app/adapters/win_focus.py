@@ -43,6 +43,14 @@ def is_locked() -> bool:
 _last_activate: dict[int, float] = {}
 
 
+def is_foreground(hwnd: int) -> bool:
+    """目标窗口是不是当前前台窗口。"""
+    try:
+        return user32.GetForegroundWindow() == hwnd
+    except Exception:
+        return False
+
+
 def activate(hwnd: int) -> bool:
     """温和地把窗口带到前台：已经在前台就不动，避免打断正在显示的对话框。"""
     import time
