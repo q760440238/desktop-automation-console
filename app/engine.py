@@ -26,6 +26,7 @@ class Engine:
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._cancel: dict[str, asyncio.Event] = {}
         self._panic = False
+        self._load_panic()  # 重启后恢复急停状态
         self._run_lock = asyncio.Lock()
 
     # ------------------------------------------------------------ 状态
@@ -33,8 +34,29 @@ class Engine:
     def panic(self) -> bool:
         return self._panic
 
+    def _load_panic(self) -> None:
+        try:
+            import json
+            from pathlib import Path as _P
+
+            f = _P(__file__).resolve().parent.parent / "data" / "panic_state.json"
+            if f.exists():
+                self._panic = bool(json.loads(f.read_text(encoding="utf-8")).get("panic"))
+        except Exception:
+            pass
+
     def set_panic(self, on: bool) -> bool:
         self._panic = bool(on)
+        # 落盘：后端重启后急停不该悄悄失效
+        try:
+            import json
+            from pathlib import Path as _P
+
+            f = _P(__file__).resolve().parent.parent / "data" / "panic_state.json"
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(json.dumps({"panic": self._panic}), encoding="utf-8")
+        except Exception:
+            pass
         # 急停必须能打断正在跑的视觉操作，否则它会把 10 步点完
         try:
             from . import vision_agent

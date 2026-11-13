@@ -52,6 +52,8 @@ SYSTEM = """你是桌面操作助手。每一步你只会看到目标应用当�
 - 一次只做一个动作，做完会再给你新的截图。
 - 要输入中文时用 type，不要逐字模拟按键。
 - 找不到目标、界面不对、或者任务已经完成：用 done 或 fail，并在 thought 里说明。
+- 发消息类任务：输入框里的文字消失、聊天里出现你刚发的这条消息，就说明发出去了，返回 done。
+- 同一个位置不要点第二次；如果连续两步没有进展，换一种方式（例如改用左侧列表或搜索）。
 - 不要点击与任务无关的东西。"""
 
 
@@ -114,7 +116,7 @@ def _ask(img: Image.Image, system: str, user: str, timeout: int = 180) -> str:
             }
         ],
         # 视觉模型会先"想"再答，预算给小了只会返回空内容
-        "max_tokens": 1500,
+        "max_tokens": 3000,
     }
     res = ai._request  # noqa: F841  (保持函数引用，便于测试替换)
     resp = ai._request(f"{base}/chat/completions", payload, key, timeout)
@@ -213,7 +215,11 @@ def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str
             return {"ok": False, "detail": "已急停，视觉操作中止", "steps": trace}
         act = _extract_json(raw)
         if act is None:
-            return {"ok": False, "detail": f"模型没有返回 JSON：{raw[:120]}", "steps": trace}
+            # 推理型模型偶尔只输出思考过程，补问一次，只要 JSON
+            raw2 = _ask(img, system, "只输出那个 JSON 对象，不要任何解释和其他文字。")
+            act = _extract_json(raw2)
+        if act is None:
+            return {"ok": False, "detail": f"模型没有返回 JSON：{(raw or '')[:120]}", "steps": trace}
 
         kind = str(act.get("action") or "").lower()
         trace.append({"step": step, "thought": act.get("thought"), "action": kind})
