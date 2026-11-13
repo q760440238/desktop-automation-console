@@ -12,6 +12,13 @@ from typing import Any
 from .. import vision_agent
 from .base import ExecResult
 
+# 提交成功后界面上必然出现的字样；没有这些就说明没真提交
+PROOF_WORDS = {
+    "add_friend": ("申请已发送", "请求已发送", "好友申请已发送", "等待对方验证", "已发送好友申请"),
+    "join_group": ("申请已发送", "已提交申请", "等待管理员审核", "已申请加群", "申请已提交"),
+    "send_message": (),
+}
+
 APP_NAMES = {"qq": "QQ", "wechat": "微信", "wecom": "企业微信"}
 
 TASKS = {
@@ -102,6 +109,25 @@ def run_task(
 
     steps = res.get("steps") or []
     trace = " → ".join(f"{s.get('action')}" for s in steps) or "无动作"
+
+    # 加好友/加群必须有「申请已发送」之类的硬证据，否则视为没做成
+    words = PROOF_WORDS.get(action) or ()
+    if res.get("ok") and words:
+        try:
+            from . import vision as win_vision
+
+            els = win_vision.look(info.hwnd)
+            hits = [w for w in words if win_vision.find(els, w)]
+        except Exception:
+            hits = []
+        if not hits:
+            seen = " / ".join(win_vision.texts(els)[:6]) if els else "（没识别到文字）"
+            return ExecResult(
+                False,
+                f"【{app}·视觉执行】没有看到「申请已发送」这类提示，判定未成功（当前界面：{seen}）",
+                screenshot=shot,
+            )
+
     if res.get("ok"):
         return ExecResult(
             True,

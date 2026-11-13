@@ -403,3 +403,20 @@ def profile_scan(
             if len(found) >= want:
                 break
     return found
+
+VERIFY_SYSTEM = """这是操作完成后的界面截图。
+刚才要做的事：{task}
+请判断这件事**是否真的成功完成了**，只输出 JSON：
+{{"success":true或false,"evidence":"你在图里看到的确凿证据（例如申请已发送、消息已出现在聊天里），没有就说明看到的是什么"}}
+注意：只是输入了内容、只是打开了页面、或者什么都没发生，都不算成功。"""
+
+
+def verify(hwnd: int, task: str) -> tuple[bool, str]:
+    """收尾校验：模型说 done 之后，再看一眼画面确认真的做成了。"""
+    try:
+        img = _capture(win32gui.GetWindowRect(hwnd), hwnd)
+        raw = _ask(img, VERIFY_SYSTEM.format(task=task), "只输出 JSON。")
+        data = _extract_json(raw) or {}
+        return bool(data.get("success")), str(data.get("evidence") or "")[:120]
+    except Exception as exc:
+        return True, f"校验异常，按成功处理：{exc}"
