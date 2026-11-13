@@ -142,6 +142,7 @@ def launch(exe: str, timeout: float = 0.0) -> bool:
 
 # ---------------------------------------------------------------- 输入
 def type_unicode(text: str, delay: float = 0.012) -> bool:
+    _ensure_unlocked()
     """用 SendInput 把字符作为 Unicode 直接打进去，不经过剪贴板。
 
     注意：keybd_event 的 bScan 是 8 位，中文（如 U+4E2D）放不下，
@@ -212,7 +213,19 @@ def set_clipboard(text: str) -> bool:
     return False
 
 
+def _ensure_unlocked() -> None:
+    """锁屏时输入没有意义，直接报错，别让上层以为点过了。"""
+    try:
+        from .win_focus import is_locked
+
+        if is_locked():
+            raise RuntimeError("屏幕已锁定，键盘/鼠标事件不会生效（请解锁后重试）")
+    except ImportError:
+        pass
+
+
 def send_keys(seq: str, delay: float = 0.05) -> None:
+    _ensure_unlocked()
     from pywinauto.keyboard import send_keys as _sk
 
     _sk(seq, pause=delay, with_spaces=True)

@@ -27,6 +27,19 @@ SWP_SHOWWINDOW = 0x0040
 PW_RENDERFULLCONTENT = 2
 
 
+def is_locked() -> bool:
+    """屏幕是否锁定：锁定时输入事件到不了应用，截图也可能是旧帧。"""
+    try:
+        DESKTOP_SWITCHDESKTOP = 0x0100
+        h = user32.OpenInputDesktop(0, False, DESKTOP_SWITCHDESKTOP)
+        if h:
+            user32.CloseDesktop(h)
+            return False
+        return True
+    except Exception:
+        return False
+
+
 def activate(hwnd: int) -> bool:
     """把窗口真正搬到前台（含 AttachThreadInput，绕过前台抢占限制）。"""
     try:
@@ -60,6 +73,9 @@ def activate(hwnd: int) -> bool:
 
 def capture_window(hwnd: int):
     """PrintWindow 直接抓窗口位图，被遮挡也能拿到正确画面；失败才退回屏幕截图。"""
+    if is_locked():
+        # 锁屏时 PrintWindow 会返回旧帧，拿去 OCR 会得到过期画面，必须直接拒绝
+        raise RuntimeError("屏幕已锁定，无法获取真实画面（请解锁后重试）")
     r = wintypes.RECT()
     user32.GetWindowRect(hwnd, ctypes.byref(r))
     w, h = r.right - r.left, r.bottom - r.top
