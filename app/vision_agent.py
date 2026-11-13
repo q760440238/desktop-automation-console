@@ -54,6 +54,7 @@ SYSTEM = """你是桌面操作助手。每一步你只会看到目标应用当�
 - 找不到目标、界面不对、或者任务已经完成：用 done 或 fail，并在 thought 里说明。
 - 发消息类任务：输入框里的文字消失、聊天里出现你刚发的这条消息，就说明发出去了，返回 done。
 - 同一个位置不要点第二次；如果连续两步没有进展，换一种方式（例如改用左侧列表或搜索）。
+- 每步会告诉你「操作后界面有没有变化」。连续两次「几乎没有变化」说明方法行不通，必须换思路。
 - 不要点击与任务无关的东西。"""
 
 
@@ -184,6 +185,31 @@ def _do(action: dict[str, Any], rect: tuple[int, int, int, int]) -> str:
     return f"结束：{kind}"
 
 
+def _locked() -> bool:
+    """屏幕是否锁定：锁定时鼠标键盘事件发不出去，必须提前停。"""
+    import ctypes
+
+    try:
+        h = ctypes.windll.user32.OpenInputDesktop(0, False, 0x0100)
+        if h:
+            ctypes.windll.user32.CloseDesktop(h)
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _diff_score(a: Image.Image, b: Image.Image) -> float:
+    """两张截图差多少：缩到 64x64 灰度后算平均绝对差，0 表示完全一样。"""
+    try:
+        ga = a.convert("L").resize((64, 64))
+        gb = b.convert("L").resize((64, 64))
+        pa, pb = list(ga.getdata()), list(gb.getdata())
+        return sum(abs(x - y) for x, y in zip(pa, pb)) / len(pa)
+    except Exception:
+        return 999.0
+
+
 def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str, Any]:
     """看一步、做一步，最多 max_steps 步。dry=True 只让模型看一步，不动手。"""
     if STOP.is_set():
@@ -194,6 +220,8 @@ def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str
     history = ""
 
     for step in range(1, max_steps + 1):
+        if _locked():
+            return {"ok": False, "detail": "执行途中屏幕被锁定，已中止（解锁后重试）", "steps": trace}
         if STOP.is_set():
             return {"ok": False, "detail": "已急停，视觉操作中止", "steps": trace}
         img = _capture(rect, hwnd)
@@ -239,9 +267,23 @@ def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str
         except Exception as exc:  # noqa: BLE001
             trace[-1]["result"] = f"失败：{exc}"
             return {"ok": False, "detail": f"第 {step} 步执行失败：{exc}", "steps": trace}
-        trace[-1]["result"] = result
-        history_lines.append(f"{step}. {result}")
+
         time.sleep(1.2)
+        # 对比操作前后的画面，告诉模型这一下有没有生效
+        try:
+            after_img = _capture(rect, hwnd)
+            diff = _diff_score(img, after_img)
+            if diff < 1.5:
+                change = "界面几乎没有变化（这一下可能点空了，下次换个位置或换种方式）"
+            elif diff < 8:
+                change = "界面有轻微变化"
+            else:
+                change = "界面有明显变化"
+        except Exception:
+            change = ""
+        trace[-1]["result"] = result
+        trace[-1]["diff"] = round(diff, 1) if isinstance(diff, float) else None
+        history_lines.append(f"{step}. {result} → {change}" if change else f"{step}. {result}")
 
     return {"ok": False, "detail": f"{max_steps} 步内没完成", "steps": trace}
 
