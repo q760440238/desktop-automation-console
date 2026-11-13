@@ -18,6 +18,7 @@ from pathlib import Path
 from PIL import Image
 
 try:  # Windows 才有
+    import win32api
     import win32con
     import win32gui
 except ImportError:  # pragma: no cover
@@ -123,11 +124,11 @@ def find(els: list[Element], needle: str, exact: bool = False) -> Element | None
 
 def click(el: Element) -> None:
     """把鼠标挪过去点一下。"""
-    win32gui.SetCursorPos(el.cx, el.cy)
+    win32api.SetCursorPos((el.cx, el.cy))
     time.sleep(0.15)
-    win32gui.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
     time.sleep(0.05)
-    win32gui.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 
 
 def click_text(hwnd: int, text: str, save_to: str | Path | None = None) -> bool:

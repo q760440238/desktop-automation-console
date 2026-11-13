@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -13,7 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, guard, setup_tools, store
+from . import ai, guard, setup_tools, store, vision_agent
 from .adapters import close_all, get_adapter, health_all
 from .autopilot import autopilot
 from .engine import engine
@@ -413,6 +414,27 @@ async def open_platform(platform: str) -> dict[str, Any]:
     except Exception as exc:
         return {"ok": False, "detail": f"打开失败：{exc}"}
 
+
+class AgentRunBody(BaseModel):
+    platform: str
+    task: str
+    max_steps: int = 8
+    dry: bool = False
+
+
+@app.post("/api/agent/run")
+def agent_run(body: AgentRunBody) -> dict[str, Any]:
+    """视觉代理：让多模态模型看着窗口一步步操作（dry=True 只看不做）。"""
+    if body.platform not in PLATFORMS:
+        raise HTTPException(404, "未知平台")
+    try:
+        mod = importlib.import_module(f"app.adapters.{body.platform}")
+        info = mod._window()
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "detail": f"找不到窗口：{exc}"}
+    if info is None:
+        return {"ok": False, "detail": "窗口不可见（请先启动应用并在前台）"}
+    return {"ok": True, "data": vision_agent.run(info.hwnd, body.task, body.max_steps, body.dry)}
 
 @app.get("/api/vision/{platform}")
 def vision_look(platform: str) -> dict[str, Any]:
