@@ -52,7 +52,15 @@ SYSTEM = """你是桌面操作助手。每一步你只会看到目标应用当�
 - 不要点击与任务无关的东西。"""
 
 
-def _capture(rect: tuple[int, int, int, int]) -> Image.Image:
+def _capture(rect: tuple[int, int, int, int], hwnd: int | None = None) -> Image.Image:
+    """抓窗口位图：优先 PrintWindow，被遮挡也能抓到；否则退回屏幕区域截图。"""
+    if hwnd is not None:
+        try:
+            from .adapters import vision as win_vision
+
+            return win_vision.capture_window(hwnd)
+        except Exception:
+            pass
     return ImageGrab.grab(bbox=rect, all_screens=True)
 
 
@@ -133,10 +141,13 @@ def _do(action: dict[str, Any], rect: tuple[int, int, int, int]) -> str:
             return "要输入的内容为空"
         from .adapters import uia
 
+        # 走 Unicode 直接输入，绕开被占用的剪贴板；失败再退回剪贴板
+        if uia.type_unicode(text):
+            return f"输入 {text[:24]}"
         if not uia.set_clipboard(text):
-            return "剪贴板被占用"
+            return "剪贴板被占用且直接输入失败"
         uia.send_keys("^v")
-        return f"输入 {text[:24]}"
+        return f"输入(粘贴) {text[:24]}"
 
     if kind == "key":
         from .adapters import uia
@@ -171,7 +182,7 @@ def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str
     history = ""
 
     for step in range(1, max_steps + 1):
-        img = _capture(rect)
+        img = _capture(rect, hwnd)
         system = SYSTEM.format(task=task, w=img.width, h=img.height)
         user = (history or "这是第一步。") + "\n请给出下一步动作。"
         try:
@@ -215,7 +226,7 @@ def propose_targets(platform: str, brief: str, limit: int = 3) -> list[dict[str,
     if info is None:
         return []
     rect = win32gui.GetWindowRect(info.hwnd)
-    out = _propose_once(_capture(rect), brief, limit)
+    out = _propose_once(_capture(rect, info.hwnd), brief, limit)
     if out:
         return out
     # 一个个人好友都没看到：让代理自己导航到「联系人」并展开分组
@@ -225,11 +236,11 @@ def propose_targets(platform: str, brief: str, limit: int = 3) -> list[dict[str,
         "3) 让具体的个人好友头像和昵称出现在列表里。不要点进任何人的聊天。"
     )
     run(info.hwnd, nav, max_steps=4)
-    out = _propose_once(_capture(rect), brief, limit)
+    out = _propose_once(_capture(rect, info.hwnd), brief, limit)
     if out:
         return out
     run(info.hwnd, "如果个人好友列表还是收起的，点击收起的分组把它展开", max_steps=2)
-    return _propose_once(_capture(rect), brief, limit)
+    return _propose_once(_capture(rect, info.hwnd), brief, limit)
 
 
 def _propose_once(img: Image.Image, brief: str, limit: int) -> list[dict[str, Any]]:
@@ -283,7 +294,7 @@ def profile_scan(
     found: list[dict[str, Any]] = []
 
     for _ in range(max(1, max_check)):
-        img = _capture(rect)
+        img = _capture(rect, info.hwnd)
         scan = _extract_json(
             _ask(
                 img,
@@ -299,7 +310,7 @@ def profile_scan(
         _click_at(rect, scan.get("x", 0), scan.get("y", 0))
         time.sleep(1.4)
 
-        card_img = _capture(rect)
+        card_img = _capture(rect, info.hwnd)
         card = _extract_json(
             _ask(card_img, CARD_SYSTEM.format(brief=brief), "只输出 JSON。")
         ) or {}

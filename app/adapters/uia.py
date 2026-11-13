@@ -141,6 +141,28 @@ def launch(exe: str, timeout: float = 0.0) -> bool:
 
 
 # ---------------------------------------------------------------- 输入
+def type_unicode(text: str, delay: float = 0.01) -> bool:
+    """直接把字符作为 Unicode 输入事件发出去，不经过剪贴板。
+
+    剪贴板常被别的程序占着（自动化工具、截图工具、输入法），
+    这条路绕开它，中文也能逐字输入。
+    """
+    import win32api
+    import win32con
+
+    if not text:
+        return False
+    try:
+        for ch in text:
+            code = ord(ch)
+            win32api.keybd_event(0, code, win32con.KEYEVENTF_UNICODE, 0)
+            win32api.keybd_event(0, code, win32con.KEYEVENTF_UNICODE | win32con.KEYEVENTF_KEYUP, 0)
+            time.sleep(delay)
+        return True
+    except Exception:
+        return False
+
+
 def set_clipboard(text: str) -> bool:
     """把文本放进剪贴板，用于把中文粘贴进聊天框。"""
     import win32clipboard

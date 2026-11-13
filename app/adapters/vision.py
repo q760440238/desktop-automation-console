@@ -89,7 +89,7 @@ def look(hwnd: int, save_to: str | Path | None = None) -> list[Element]:
     import tempfile
 
     rect = window_rect(hwnd)
-    img = _capture(rect)
+    img = capture_window(hwnd)
     p = Path(save_to) if save_to else Path(tempfile.gettempdir()) / "dac_vision.png"
     p.parent.mkdir(parents=True, exist_ok=True)
     img.save(p)
@@ -174,3 +174,41 @@ def see_window(window_fn) -> dict:
         "elements": [{"text": e.text, "x": e.cx, "y": e.cy} for e in els],
         "labels": {k: bool(find(els, k)) for k in ("搜索", "发送", "输入", "加好友", "加群")},
     }
+
+def capture_window(hwnd: int):
+    """优先用 PrintWindow 直接抓窗口位图（被别的窗口遮挡也能抓到），
+    失败再退回屏幕区域截图。"""
+    rect = win32gui.GetWindowRect(hwnd)
+    w, h = rect[2] - rect[0], rect[3] - rect[1]
+    try:
+        activate(hwnd)  # 先提到前台，否则退回屏幕截图会抓到别的窗口
+    except Exception:
+        pass
+    if w <= 0 or h <= 0:
+        raise RuntimeError("窗口尺寸异常")
+    try:
+        import win32ui
+
+        hdc = win32gui.GetWindowDC(hwnd)
+        src = win32ui.CreateDCFromHandle(hdc)
+        mem = src.CreateCompatibleDC()
+        bmp = win32ui.CreateBitmap()
+        bmp.CreateCompatibleBitmap(src, w, h)
+        mem.SelectObject(bmp)
+        ok = win32gui.PrintWindow(hwnd, mem.GetSafeHdc(), 2)
+        if ok:
+            info = bmp.GetInfo()
+            bits = bmp.GetBitmapBits(True)
+            img = Image.frombuffer(
+                "RGB", (info["bmWidth"], info["bmHeight"]), bits, "raw", "BGRX", 0, 1
+            )
+            win32gui.DeleteObject(bmp.GetHandle())
+            mem.DeleteDC()
+            src.DeleteDC()
+            win32gui.ReleaseDC(hwnd, hdc)
+            return img.copy()
+    except Exception:
+        pass
+    from PIL import ImageGrab
+
+    return ImageGrab.grab(bbox=rect, all_screens=True)

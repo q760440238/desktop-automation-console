@@ -84,6 +84,11 @@ def _search(win: Any, keyword: str) -> None:
 
 
 def _paste_and_enter(text: str) -> None:
+    # 剪贴板经常被占用，优先直接输入字符
+    if uia.type_unicode(text):
+        time.sleep(0.3)
+        uia.send_keys("{ENTER}")
+        return
     if not uia.set_clipboard(text):
         raise RuntimeError("无法写入剪贴板，消息未发送")
     uia.send_keys("^v")
@@ -145,48 +150,40 @@ def _do(action: str, target: str, text: str) -> ExecResult:
             )
 
         if action == "add_friend":
-            hit = _click_text(win, ["加好友", "添加好友", "加为好友"])
-            if not hit:
-                p = uia.capture(info.hwnd, shot)
-                return ExecResult(
-                    False,
-                    f"搜索结果里没有「加好友」入口，可能号码不存在或对方已是你好友（目标：{target}）",
-                    screenshot=p,
-                )
-            time.sleep(1.2)
-            if text:
-                box = uia.find_edit(win)
-                if box is not None:
-                    try:
-                        box.click_input()
-                        _paste_and_enter(text)
-                    except Exception:
-                        pass
-            done = _click_text(win, ["发送", "确定", "完成", "下一步"], timeout=4.0)
-            p = uia.capture(info.hwnd, shot)
-            if done:
-                return ExecResult(True, f"已向 {target} 发送好友申请（点了「{done}」）", screenshot=p)
-            return ExecResult(False, "已打开加好友面板但没有点到提交按钮，请手动确认", screenshot=p)
+            from .. import vision_agent
 
+            task = (
+                f"在 QQ 里加好友。步骤：1) 点击顶部的搜索框；2) 输入 QQ 号 {target} 并回车；"
+                f"3) 在搜索结果里点开这个人；4) 找到并点击「加好友」按钮；"
+                f"5) 如果要填验证消息，填「{text or '你好'}」；6) 点击发送/确定提交申请。"
+            )
+            res = vision_agent.run(info.hwnd, task, max_steps=10)
+            shot2 = uia.capture(info.hwnd, shot_path("qq", f"addfriend_{target}"))
+            if res.get("ok"):
+                return ExecResult(True, f"已通过视觉操作向 {target} 提交好友申请", screenshot=shot2)
+            return ExecResult(
+                False,
+                f"加好友未完成：{res.get('detail') or '未知原因'}（{len(res.get('steps') or [])} 步）",
+                screenshot=shot2,
+            )
         if action == "join_group":
-            hit = _click_text(win, ["加群", "申请加群", "加入群聊", "查看群资料"])
-            if not hit:
-                p = uia.capture(info.hwnd, shot)
-                return ExecResult(False, f"搜索结果里没有加群入口，群号可能不存在（目标：{target}）", screenshot=p)
-            time.sleep(1.2)
-            if text:
-                box = uia.find_edit(win)
-                if box is not None:
-                    try:
-                        box.click_input()
-                        _paste_and_enter(text)
-                    except Exception:
-                        pass
-            done = _click_text(win, ["发送", "确定", "申请", "提交"], timeout=4.0)
-            p = uia.capture(info.hwnd, shot)
-            if done:
-                return ExecResult(True, f"已提交加入群 {target} 的申请（点了「{done}」）", screenshot=p)
-            return ExecResult(False, "已打开群资料但没有点到申请按钮，请手动确认", screenshot=p)
+            from .. import vision_agent
+
+            task = (
+                f"在 QQ 里加群。步骤：1) 点击顶部的搜索框；2) 输入群号 {target} 并回车；"
+                f"3) 在搜索结果里点开这个群；4) 找到并点击「加群」或「申请加群」；"
+                f"5) 如果要填验证信息，填「{text or '你好，想加入'}」；6) 点击发送/确定提交申请。"
+            )
+            res = vision_agent.run(info.hwnd, task, max_steps=10)
+            shot2 = uia.capture(info.hwnd, shot_path("qq", f"joingroup_{target}"))
+            if res.get("ok"):
+                return ExecResult(True, f"已通过视觉操作申请加入群 {target}", screenshot=shot2)
+            return ExecResult(
+                False,
+                f"加群未完成：{res.get('detail') or '未知原因'}（{len(res.get('steps') or [])} 步）",
+                screenshot=shot2,
+            )
+
 
         return ExecResult(False, f"QQ 不支持动作 {action}")
     except Exception as exc:
