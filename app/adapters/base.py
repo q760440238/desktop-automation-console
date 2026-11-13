@@ -67,15 +67,27 @@ class BaseAdapter:
         self._pool = [str(t).strip() for t in (targets or []) if str(t).strip()]
 
     async def discover(self, keyword: str, limit: int = 20) -> dict[str, Any]:
-        """桌面端的「发现」= 从名单里取人，不做站内搜索。"""
+        """桌面端的「发现」：有名单用名单，没名单就让视觉模型看界面自己挑人。"""
         pool = list(getattr(self, "_pool", []) or [])
-        if not pool:
+        if pool:
+            cands = [{"url": t, "name": t, "snippet": "名单目标"} for t in pool[: max(1, limit)]]
+            return {"ok": True, "candidates": cands, "keyword": keyword, "pool": True}
+
+        import asyncio
+
+        from .. import vision_agent
+
+        key = getattr(self, "key", "")
+        if not key:
+            return {"ok": False, "detail": "这个平台还不支持自动找人"}
+
+        cands = await asyncio.to_thread(vision_agent.propose_targets, key, keyword or "任意好友", limit)
+        if not cands:
             return {
                 "ok": False,
-                "detail": "桌面端无限模式需要先在「目标」里填一份名单（每行一个好友备注/QQ号/群名）",
+                "detail": "视觉没有从界面上找到可用的联系人（可能是列表收起了，或窗口不在前台）",
             }
-        cands = [{"url": t, "name": t, "snippet": "名单目标"} for t in pool[: max(1, limit)]]
-        return {"ok": True, "candidates": cands, "keyword": keyword, "pool": True, "url": "名单", "title": "名单"}
+        return {"ok": True, "candidates": cands, "keyword": keyword, "vision": True}
     platform: str = ""
     kind: str = "generic"
     actions: set[str] = set()

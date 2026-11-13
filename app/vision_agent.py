@@ -27,6 +27,16 @@ from . import ai
 
 ALLOWED = {"click", "type", "key", "scroll", "done", "fail"}
 
+PROPOSE_SYSTEM = """你在看一个即时通讯软件的界面截图。
+任务：从左侧的会话/联系人列表里，挑出符合下面描述的联系人，最多 {n} 个。
+描述：{brief}
+
+规则：
+- 只挑具体的个人，不要群聊、公众号、系统会话（如「文件传输助手」「我的电脑」「QQ团队」）。
+- 名字要和你看到的一字不差。
+- 只能输出 JSON，不要解释：{{"targets":[{{"name":"看到的完整名字","why":"一句话理由"}}]}}
+- 没有合适的就输出 {{"targets":[]}}。"""
+
 SYSTEM = """你是桌面操作助手。每一步你只会看到目标应用当前窗口的截图。
 任务：{task}
 
@@ -192,3 +202,43 @@ def run(hwnd: int, task: str, max_steps: int = 8, dry: bool = False) -> dict[str
         time.sleep(1.2)
 
     return {"ok": False, "detail": f"{max_steps} 步内没完成", "steps": trace}
+
+def propose_targets(platform: str, brief: str, limit: int = 3) -> list[dict[str, Any]]:
+    """让模型看一眼界面，从可见的联系人列表里挑人。
+
+    桌面端「自动找人」的核心：不再需要人工给名单。
+    """
+    import importlib
+
+    mod = importlib.import_module(f".adapters.{platform}", __package__)
+    info = mod._window()
+    if info is None:
+        return []
+    rect = win32gui.GetWindowRect(info.hwnd)
+    out = _propose_once(_capture(rect), brief, limit)
+    if out:
+        return out
+    # 一个个人好友都没看到：让代理自己导航到「联系人」并展开分组
+    nav = (
+        "现在要看到个人好友名单。步骤：1) 如果左侧导航栏还没选中「联系人」（人形图标），先点它；"
+        "2) 在左侧列表里找到分组名（例如「我的好友」），点击把它展开；"
+        "3) 让具体的个人好友头像和昵称出现在列表里。不要点进任何人的聊天。"
+    )
+    run(info.hwnd, nav, max_steps=4)
+    out = _propose_once(_capture(rect), brief, limit)
+    if out:
+        return out
+    run(info.hwnd, "如果个人好友列表还是收起的，点击收起的分组把它展开", max_steps=2)
+    return _propose_once(_capture(rect), brief, limit)
+
+
+def _propose_once(img: Image.Image, brief: str, limit: int) -> list[dict[str, Any]]:
+    system = PROPOSE_SYSTEM.format(n=max(1, min(limit, 8)), brief=brief)
+    raw = _ask(img, system, "现在开始，只输出 JSON。")
+    data = _extract_json(raw) or {}
+    out: list[dict[str, Any]] = []
+    for item in data.get("targets") or []:
+        name = str((item or {}).get("name") or "").strip()
+        if name:
+            out.append({"url": name, "name": name, "snippet": str(item.get("why") or "")[:40]})
+    return out

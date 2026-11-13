@@ -103,8 +103,7 @@ class AutoPilot:
         if platform not in PLATFORMS:
             raise ValueError("未知平台")
         pool = [str(t).strip() for t in (targets or []) if str(t).strip()]
-        if PLATFORMS[platform]["kind"] == "desktop" and not pool:
-            raise ValueError("桌面端的无限模式按名单轮发，请先在「目标」里填好友备注/QQ 号/群名（每行一个）")
+        # 桌面端不再强制名单：没给就让视觉模型自己看界面找人
         if action not in PLATFORMS[platform]["actions"]:
             raise ValueError(f"{PLATFORMS[platform]['name']} 不支持「{ACTION_LABELS.get(action, action)}」")
         if not (brief or "").strip():
@@ -370,7 +369,9 @@ class AutoPilot:
                 # 1) 找目标（每轮换一个关键词，并且多抓一些再挑没发过的）
                 s["round"] = int(s["round"]) + 1
                 kws = s.get("keywords") or [s["brief"]]
-                keyword = kws[(int(s["round"]) - 1) % len(kws)]
+                # 桌面端靠视觉找人，要用原始描述，不能用拆出来的搜索词
+                is_desktop = PLATFORMS[platform]["kind"] == "desktop"
+                keyword = s["brief"] if is_desktop else kws[(int(s["round"]) - 1) % len(kws)]
                 s["phase"] = "寻找目标"
                 s["detail"] = f"搜索「{keyword[:24]}」"
                 fetch = min(30, max(10, int(s.get("limit", 5)) * 4))

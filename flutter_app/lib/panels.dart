@@ -628,10 +628,6 @@ class _TaskFormState extends State<TaskForm> {
     final state = widget.state;
     final p = state.current;
     if (p == null) return;
-    if (p.isDesktop && _targetList.isEmpty) {
-      setState(() => _status = '桌面端无限模式按「目标」名单轮发，请先在目标里填好友备注/QQ 号/群名');
-      return;
-    }
     if (!p.isDesktop && _autoBrief.text.trim().isEmpty) {
       setState(() => _status = '先写一句要找什么样的人');
       return;
@@ -734,7 +730,7 @@ class _TaskFormState extends State<TaskForm> {
                 (running
                     ? '正在后台循环执行…'
                     : (widget.state.current?.isDesktop ?? false)
-                    ? '桌面端按「目标」名单轮发，名单跑完自动停止'
+                    ? 'AI 会看界面自己找联系人，不用你指定'
                     : '启动后会持续找新目标，直到你停止或触发上限'),
             style: const TextStyle(fontSize: 11, color: AppColors.muted),
           ),

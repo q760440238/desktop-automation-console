@@ -163,6 +163,7 @@ def _guess_title(win: Any) -> str:
 
 
 class WechatAdapter(BaseAdapter):
+    key = "wechat"
     platform = "wechat"
     kind = "desktop"
     actions = {"send_message"}

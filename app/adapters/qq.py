@@ -206,6 +206,7 @@ def _probe() -> dict[str, Any]:
 
 
 class QQAdapter(BaseAdapter):
+    key = "qq"
     platform = "qq"
     kind = "desktop"
     actions = {"add_friend", "join_group", "send_message"}

@@ -134,6 +134,7 @@ def _probe() -> dict[str, Any]:
 
 
 class WecomAdapter(BaseAdapter):
+    key = "wecom"
     platform = "wecom"
     kind = "desktop"
     actions = {"send_message"}
