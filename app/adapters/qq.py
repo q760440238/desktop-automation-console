@@ -17,7 +17,22 @@ TITLE_RE = r"QQ"
 
 
 def _window() -> Any:
-    return uia.find_window(PROCS, TITLE_RE, include_hidden=True)
+    """返回 QQ 的主窗口。
+
+    QQ 未登录时会先出现一个 320x460 左右的登录小窗，拿它去做自动化没有意义，
+    所以这里优先选宽度 >= 600 的主窗口；只有在没有主窗口时才退回最大的那个
+    （让「启动应用」还能把登录窗口唤到前台）。
+    """
+    import win32gui
+
+    wins = uia.list_windows(PROCS, include_hidden=True)
+    if not wins:
+        return None
+    mains = [w for w in wins if (w.rect[2] - w.rect[0]) >= 600]
+    if mains:
+        return max(mains, key=lambda w: (w.rect[2] - w.rect[0]) * (w.rect[3] - w.rect[1]))
+    return max(wins, key=lambda w: (w.rect[2] - w.rect[0]) * (w.rect[3] - w.rect[1]))
+
 
 
 def _health() -> dict[str, Any]:
@@ -28,9 +43,16 @@ def _health() -> dict[str, Any]:
             "ready": False,
             "detail": "QQ 未运行" + ("（已找到 QQ.exe，可点「启动应用」）" if exe else "（未找到 QQ.exe）"),
         }
-    win = _window()
-    if win is None:
+    wins = uia.list_windows(PROCS, include_hidden=True)
+    main = [w for w in wins if (w.rect[2] - w.rect[0]) >= 600]
+    if not main:
+        if wins:
+            return {
+                "ready": False,
+                "detail": "QQ 停在登录页：请在手机 QQ 上确认登录（或点窗口里的「自动登录」）",
+            }
         return {"ready": False, "detail": "QQ 进程在运行但主窗口不可见，请从托盘打开"}
+    win = _window()
     return {"ready": True, "detail": f"已连接「{win.title}」"}
 
 
