@@ -103,6 +103,11 @@ def add_friend(hwnd: int, target: str, text: str) -> tuple[bool, str]:
 
 
 def join_group(hwnd: int, target: str, text: str) -> tuple[bool, str]:
+    # 优先走「加好友/群」独立窗口（更稳），面板没开再退回主窗口搜索
+    from . import panel_flow
+
+    if panel_flow.find_panel() is not None:
+        return panel_flow.join_group_via_panel(target, text)
     """搜群 → 开群资料 → 申请加群 → 填验证 → 提交。"""
     from . import uia
 
