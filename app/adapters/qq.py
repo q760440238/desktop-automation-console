@@ -74,13 +74,16 @@ def _focus_search(win: Any) -> None:
 
 
 def _search(win: Any, keyword: str) -> None:
+    """老路径的搜索；失败不抛异常，交给后续视觉判断。"""
     _focus_search(win)
     time.sleep(0.3)
     uia.send_keys("^a")
-    if not uia.set_clipboard(keyword):
-        raise RuntimeError("无法写入剪贴板")
-    uia.send_keys("^v")
-    time.sleep(1.4)
+    if uia.type_unicode(keyword):
+        time.sleep(1.2)
+        return
+    if uia.set_clipboard(keyword):
+        uia.send_keys("^v")
+        time.sleep(1.2)
 
 
 def _paste_and_enter(text: str) -> None:
@@ -102,51 +105,53 @@ def _do(action: str, target: str, text: str) -> ExecResult:
         return ExecResult(False, "QQ 未启动或主窗口不可见，请先登录 QQ")
     shot = shot_path("qq", f"{action}_{target}")
     try:
+        # 全部动作走视觉执行（UIA 在 QQ 上不可用，三个应用统一逻辑）
+        from . import vision_desktop
+
+        return vision_desktop.run_task(
+            "qq", action, target, text, max_steps=10, window_fn=_window
+        )
         uia.focus_window(info.hwnd)
         win = uia.connect(info.hwnd)
-        _search(win, target)
+        # 三个动作都由视觉代理自己搜索，这里不再统一预搜
 
         if action == "send_message":
-            uia.send_keys("{ENTER}")
-            time.sleep(1.0)
-            box = uia.find_edit(win)
-            if box is None:
-                # 发之前用「看」确认会话标题确实是这个人：看错了宁可不发
-                try:
-                    ok_title, seen = vision.header_has(info.hwnd, target)
-                except Exception as exc:
-                    ok_title, seen = True, f"视觉校验异常：{exc}"
-                if not ok_title and seen and "异常" not in seen:
-                    return ExecResult(
-                        False,
-                        f"会话标题里没看到「{target}」（当前顶部文字：{seen}），已中止，避免发错人",
-                        screenshot=uia.capture(info.hwnd, shot_path("qq", f"mismatch_{target}")),
-                    )
-                # QQ NT 是 Electron，UIA 控件树为空，找不到输入框。
-                # 此时搜索→回车后焦点已在聊天输入框，直接键盘粘贴发送。
-                before = uia.capture(info.hwnd, shot)
-                if not uia.set_clipboard(text):
-                    return ExecResult(False, "无法写入剪贴板，消息未发送", screenshot=before)
-                uia.send_keys("^v")
-                time.sleep(0.6)
-                uia.send_keys("{ENTER}")
-                time.sleep(1.0)
-                after = uia.capture(info.hwnd, shot_path("qq", f"sent_{target}"))
+            from .. import vision_agent
+
+            # 第一步：用视觉打开聊天（不发送），随后用程序校验标题，防止发错人
+            nav = (
+                f"在 QQ 里打开与「{target}」的聊天窗口。步骤：点击顶部搜索框，输入「{target}」，"
+                f"回车或点击搜索结果里的这个人，进入和他的聊天。只打开聊天，绝对不要发送任何消息。"
+            )
+            r1 = vision_agent.run(info.hwnd, nav, max_steps=6)
+            shot2 = uia.capture(info.hwnd, shot)
+
+            ok_title, seen = vision.header_has(info.hwnd, target)
+            if not ok_title:
                 return ExecResult(
-                    True,
-                    f"已通过 QQ 向「{target}」发送 {len(text)} 字（键盘模式，已留发送前后截图，建议核对）",
-                    screenshot=after,
+                    False,
+                    f"没能打开与「{target}」的聊天（顶部文字：{seen}；导航 {len(r1.get('steps') or [])} 步）",
+                    screenshot=shot2,
                 )
-            try:
-                box.click_input()
-            except Exception:
-                pass
-            _paste_and_enter(text)
-            time.sleep(0.5)
+
+            # 第二步：输入并发送（直接用 Unicode 输入，不依赖剪贴板）
+            sent = None
+            if uia.type_unicode(text):
+                sent = "直接输入"
+            elif uia.set_clipboard(text):
+                uia.send_keys("^v")
+                sent = "粘贴"
+            if not sent:
+                return ExecResult(False, "无法把消息写入输入框（剪贴板与直接输入都失败）", screenshot=shot2)
+
+            time.sleep(0.4)
+            uia.send_keys("{ENTER}")
+            time.sleep(0.9)
+            after = uia.capture(info.hwnd, shot_path("qq", f"sent_{target}"))
             return ExecResult(
                 True,
-                f"已向「{target}」发送 {len(text)} 字消息（已留截图）",
-                screenshot=uia.capture(info.hwnd, shot),
+                f"已通过视觉操作向「{target}」发送（{sent}，已校验会话标题，截图见附件）",
+                screenshot=after,
             )
 
         if action == "add_friend":

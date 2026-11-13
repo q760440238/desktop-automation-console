@@ -128,7 +128,11 @@ def _do(action: dict[str, Any], rect: tuple[int, int, int, int]) -> str:
     if kind == "click":
         x = rect[0] + int(action.get("x") or 0)
         y = rect[1] + int(action.get("y") or 0)
-        win32api.SetCursorPos((x, y))
+        try:
+            win32api.SetCursorPos((x, y))
+        except Exception as exc:
+            # 屏幕锁定/输入桌面不可用时，鼠标事件发不出去
+            raise RuntimeError(f"无法移动鼠标光标（可能屏幕已锁定或桌面不可交互）：{exc}") from exc
         time.sleep(0.2)
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
         time.sleep(0.08)

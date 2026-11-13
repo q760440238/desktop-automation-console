@@ -122,6 +122,12 @@ def _probe() -> dict[str, Any]:
     if info is None:
         return {"error": "企业微信未运行", "windows": [w.as_dict() for w in uia.list_windows(PROCS)]}
     try:
+        # 全部动作走视觉执行（UIA 在 QQ 上不可用，三个应用统一逻辑）
+        from . import vision_desktop
+
+        return vision_desktop.run_task(
+            "wecom", action, target, text, max_steps=10, window_fn=_window
+        )
         uia.focus_window(info.hwnd)
     except Exception:
         pass
