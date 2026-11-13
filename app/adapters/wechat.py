@@ -143,7 +143,7 @@ def _probe() -> dict[str, Any]:
         from . import vision_desktop
 
         return vision_desktop.run_task(
-            "wechat", action, target, text, max_steps=14, window_fn=_window
+            "wechat", action, target, text, max_steps=20, window_fn=_window
         )
         uia.focus_window(info.hwnd)
     except Exception:

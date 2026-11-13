@@ -109,7 +109,7 @@ def _do(action: str, target: str, text: str) -> ExecResult:
         from . import vision_desktop
 
         return vision_desktop.run_task(
-            "qq", action, target, text, max_steps=14, window_fn=_window
+            "qq", action, target, text, max_steps=20, window_fn=_window
         )
         uia.focus_window(info.hwnd)
         win = uia.connect(info.hwnd)
@@ -162,7 +162,7 @@ def _do(action: str, target: str, text: str) -> ExecResult:
                 f"3) 在搜索结果里点开这个人；4) 找到并点击「加好友」按钮；"
                 f"5) 如果要填验证消息，填「{text or '你好'}」；6) 点击发送/确定提交申请。"
             )
-            res = vision_agent.run(info.hwnd, task, max_steps=14)
+            res = vision_agent.run(info.hwnd, task, max_steps=20)
             shot2 = uia.capture(info.hwnd, shot_path("qq", f"addfriend_{target}"))
             if res.get("ok"):
                 return ExecResult(True, f"已通过视觉操作向 {target} 提交好友申请", screenshot=shot2)
@@ -179,7 +179,7 @@ def _do(action: str, target: str, text: str) -> ExecResult:
                 f"3) 在搜索结果里点开这个群；4) 找到并点击「加群」或「申请加群」；"
                 f"5) 如果要填验证信息，填「{text or '你好，想加入'}」；6) 点击发送/确定提交申请。"
             )
-            res = vision_agent.run(info.hwnd, task, max_steps=14)
+            res = vision_agent.run(info.hwnd, task, max_steps=20)
             shot2 = uia.capture(info.hwnd, shot_path("qq", f"joingroup_{target}"))
             if res.get("ok"):
                 return ExecResult(True, f"已通过视觉操作申请加入群 {target}", screenshot=shot2)

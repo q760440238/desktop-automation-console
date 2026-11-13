@@ -14,7 +14,14 @@ from .base import ExecResult
 
 # 提交成功后界面上必然出现的字样；没有这些就说明没真提交
 PROOF_WORDS = {
-    "add_friend": ("申请已发送", "请求已发送", "好友申请已发送", "等待对方验证", "已发送好友申请"),
+    "add_friend": (
+        "加「{target}」为好友。用顶部搜索框，不要用「+」菜单："
+        "1) 点击顶部搜索框，输入「{target}」并回车；"
+        "2) 结果里会出现「联系人」分组，点开名字是「{target}」的那个人，进入资料卡；"
+        "3) 在资料卡上找到并点击「加好友」按钮；"
+        "4) 如果弹出验证消息输入框，填「{text}」；"
+        "5) 点击发送/确定提交申请。中途如果冒出别的弹窗，先点取消或关闭。"
+    ),
     "join_group": ("申请已发送", "已提交申请", "等待管理员审核", "已申请加群", "申请已提交"),
     "send_message": (),
 }
@@ -64,7 +71,7 @@ def run_task(
     action: str,
     target: str,
     text: str = "",
-    max_steps: int = 14,
+    max_steps: int = 20,
     window_fn: Any = None,
 ) -> ExecResult:
     """看屏幕 → 操作 → 再看，直到模型认为完成。返回统一的结果对象。"""
@@ -79,6 +86,17 @@ def run_task(
     info = window_fn()
     if info is None:
         return ExecResult(False, f"{app} 未启动或主窗口不可见，请先登录")
+
+    # 加好友/加群：走确定性的 OCR 点击流程，比让模型自由导航稳
+    if action in ("add_friend", "join_group"):
+        from . import scripted_flows
+
+        fn = scripted_flows.add_friend if action == "add_friend" else scripted_flows.join_group
+        try:
+            ok, detail = fn(info.hwnd, target, text or "你好")
+        except Exception as exc:  # noqa: BLE001
+            return ExecResult(False, f"{app} 脚本流程异常：{exc}")
+        return ExecResult(ok, f"【{app}·脚本流程】{detail}")
 
     tpl = TASKS.get(action)
     if tpl is None:
