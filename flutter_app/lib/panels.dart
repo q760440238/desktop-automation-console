@@ -1256,6 +1256,31 @@ class _TaskFormState extends State<TaskForm> {
                         );
                       }).toList(),
                     ),
+                  if (p != null && p.isDesktop)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 7),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.info_outline,
+                            size: 13,
+                            color: AppColors.warn,
+                          ),
+                          const SizedBox(width: 5),
+                          Expanded(
+                            child: Text(
+                              '执行前请先把「${p.name}」窗口切到最前面。程序不会自动抢焦点——抢了会让它的弹窗假卡死，之后点哪都没反应。',
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                color: AppColors.warn,
+                                height: 1.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   if (p != null && p.hint.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 7),
